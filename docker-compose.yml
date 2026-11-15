@@ -1,0 +1,26 @@
+version: "3.9"
+
+services:
+  backend:
+    build:
+      context: ./backend
+    container_name: estate-gate-backend
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=sqlite:///./estate_access.db
+      - JWT_SECRET_KEY=estate-gate-production-secret-2026
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+
+  admin-dashboard:
+    image: node:20-alpine
+    working_dir: /app
+    volumes:
+      - ./admin-dashboard:/app
+    ports:
+      - "3000:3000"
+    environment:
+      - NEXT_PUBLIC_API_URL=http://localhost:8000
+    command: sh -c "npm install && npm run dev"
+    depends_on:
+      - backend

@@ -1,0 +1,28 @@
+{
+  "expo": {
+    "name": "Royal Palms Estate Access",
+    "slug": "royal-palms-estate-access",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "splash": {
+      "backgroundColor": "#0F172A"
+    },
+    "android": {
+      "package": "com.royalpalms.estateaccess",
+      "versionCode": 1,
+      "adaptiveIcon": {
+        "backgroundColor": "#0F172A"
+      },
+      "permissions": [
+        "INTERNET",
+        "VIBRATE",
+        "RECEIVE_BOOT_COMPLETED"
+      ]
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.royalpalms.estateaccess"
+    }
+  }
+}

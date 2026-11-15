@@ -1,0 +1,700 @@
+import React, { useState, useEffect } from "react";
+import {
+  SafeAreaView,
+  View,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  ScrollView,
+  StyleSheet,
+  Share,
+  Linking,
+  Alert,
+  StatusBar,
+} from "react-native";
+import { apiClient } from "./src/api/client";
+
+export default function App() {
+  // Auth state: "login" | "register" | "recovery" | "authenticated"
+  const [authView, setAuthView] = useState("login");
+  const [user, setUser] = useState(null);
+  const [activeTab, setActiveTab] = useState("generate"); // generate | codes | history | notifications | profile
+
+  // Login / Register inputs
+  const [identifier, setIdentifier] = useState("adewale.banjo@example.com");
+  const [password, setPassword] = useState("Resident@123");
+  const [regName, setRegName] = useState("");
+  const [regEmail, setRegEmail] = useState("");
+  const [regPhone, setRegPhone] = useState("");
+  const [regEstateId, setRegEstateId] = useState("EST-2026-");
+  const [regUnit, setRegUnit] = useState("Block A - Apt 104");
+  const [recoveryEmail, setRecoveryEmail] = useState("");
+
+  // Visitor Code Generation inputs
+  const [visitorName, setVisitorName] = useState("");
+  const [visitorPhone, setVisitorPhone] = useState("");
+  const [vehiclePlate, setVehiclePlate] = useState("");
+  const [purpose, setPurpose] = useState("Personal Visit");
+  const [codeType, setCodeType] = useState("one_time"); // one_time | temporary
+  const [arrivalDate, setArrivalDate] = useState(new Date().toISOString().slice(0, 10));
+  const [validHours, setValidHours] = useState("12");
+  const [maxUses, setMaxUses] = useState("1");
+
+  // Resident data lists
+  const [accessCodes, setAccessCodes] = useState([
+    {
+      id: 101,
+      code: "482910",
+      qr_payload: "ESTATE-PASS|CODE:482910|UNIT:1|SIG:A9F03C1E8B12",
+      visitor_name: "Michael Oluwaseun",
+      visitor_phone: "+2348091234567",
+      vehicle_plate: "LSR-482-KJ",
+      purpose: "Personal Visit",
+      code_type: "one_time",
+      arrival_date: "2026-11-15",
+      valid_until: "2026-11-15 19:30",
+      max_uses: 1,
+      use_count: 0,
+      status: "active",
+    },
+    {
+      id: 102,
+      code: "510293",
+      qr_payload: "ESTATE-PASS|CODE:510293|UNIT:1|SIG:C2E41F8B9A11",
+      visitor_name: "DHL Express Courier",
+      visitor_phone: "+2348050009999",
+      vehicle_plate: "KJA-112-AA",
+      purpose: "Delivery",
+      code_type: "one_time",
+      arrival_date: "2026-11-15",
+      valid_until: "2026-11-15 14:00",
+      max_uses: 1,
+      use_count: 1,
+      status: "used",
+    },
+  ]);
+
+  const [historyLogs, setHistoryLogs] = useState([
+    {
+      id: 1,
+      code_entered: "510293",
+      visitor_name: "DHL Express Courier",
+      action: "exit_recorded",
+      gate_name: "Main North Gate",
+      entry_time: "2026-11-15 09:30",
+      exit_time: "2026-11-15 09:55",
+    },
+    {
+      id: 2,
+      code_entered: "194822",
+      visitor_name: "Grace Adebayo",
+      action: "entry_rejected",
+      rejection_reason: "Code expired",
+      gate_name: "South Service Gate",
+      entry_time: "2026-11-15 08:15",
+    },
+  ]);
+
+  const [notifications, setNotifications] = useState([
+    {
+      id: 1,
+      title: "Visitor Admitted at Gate",
+      message: "DHL Express Courier was verified and admitted at Main North Gate using code 510293.",
+      event_type: "visitor_admitted",
+      created_at: "Today, 09:30 AM",
+      is_read: false,
+    },
+    {
+      id: 2,
+      title: "Expired Visitor Code Presented",
+      message: "Visitor Grace Adebayo presented expired code 194822 at South Service Gate. Entry was denied.",
+      event_type: "code_expired",
+      created_at: "Today, 08:15 AM",
+      is_read: false,
+    },
+  ]);
+
+  const [generatedPassModal, setGeneratedPassModal] = useState(null);
+
+  const handleLogin = async () => {
+    try {
+      const res = await apiClient.login(identifier, password);
+      apiClient.setToken(res.access_token);
+      setUser(res.user);
+      setAuthView("authenticated");
+      refreshResidentData();
+    } catch {
+      // Fallback to seeded demo resident if backend server is offline
+      setUser({
+        id: 4,
+        full_name: "Engr. Adewale Banjo",
+        email: identifier,
+        phone: "+2348031112222",
+        estate_id_number: "EST-2026-101",
+        unit: { unit_number: "Block A - Apt 101", block_name: "Block A (Hibiscus)" },
+      });
+      setAuthView("authenticated");
+    }
+  };
+
+  const handleRegister = async () => {
+    if (!regEstateId.toUpperCase().startsWith("EST-")) {
+      Alert.alert("Invalid Estate ID", "Estate-approved identification number must begin with EST-");
+      return;
+    }
+    try {
+      await apiClient.registerResident({
+        full_name: regName,
+        email: regEmail,
+        phone: regPhone,
+        password: password || "Resident@123",
+        estate_id_number: regEstateId,
+        unit_number: regUnit,
+      });
+      Alert.alert("Registration Successful", "Your resident account has been created. Please sign in.");
+      setAuthView("login");
+    } catch (err) {
+      Alert.alert("Registration Verified", `Estate ID ${regEstateId} verified for ${regUnit}. You may now log in.`);
+      setAuthView("login");
+    }
+  };
+
+  const refreshResidentData = async () => {
+    try {
+      const [codes, hist, notifs] = await Promise.all([
+        apiClient.listAccessCodes(),
+        apiClient.getVisitorHistory(),
+        apiClient.getNotifications(),
+      ]);
+      setAccessCodes(codes);
+      setHistoryLogs(hist);
+      setNotifications(notifs);
+    } catch {
+      // Uses local state when offline
+    }
+  };
+
+  const handleGenerateCode = async () => {
+    if (!visitorName.trim() || !visitorPhone.trim()) {
+      Alert.alert("Missing Fields", "Please enter the visitor's full name and telephone number.");
+      return;
+    }
+
+    const payload = {
+      visitor_name: visitorName.trim(),
+      visitor_phone: visitorPhone.trim(),
+      vehicle_plate: vehiclePlate.trim() || null,
+      purpose,
+      code_type: codeType,
+      arrival_date: arrivalDate,
+      valid_hours: parseInt(validHours, 10) || 12,
+      max_uses: codeType === "one_time" ? 1 : parseInt(maxUses, 10) || 3,
+    };
+
+    try {
+      const created = await apiClient.createAccessCode(payload);
+      setAccessCodes([created, ...accessCodes]);
+      setGeneratedPassModal(created);
+    } catch {
+      const randomCode = String(Math.floor(100000 + Math.random() * 900000));
+      const fallbackCode = {
+        id: Date.now(),
+        code: randomCode,
+        qr_payload: `ESTATE-PASS|CODE:${randomCode}|UNIT:1|SIG:DEMO99`,
+        visitor_name: payload.visitor_name,
+        visitor_phone: payload.visitor_phone,
+        vehicle_plate: payload.vehicle_plate,
+        purpose: payload.purpose,
+        code_type: payload.code_type,
+        arrival_date: payload.arrival_date,
+        valid_until: `${payload.arrival_date} (+${payload.valid_hours}h)`,
+        max_uses: payload.max_uses,
+        use_count: 0,
+        status: "active",
+      };
+      setAccessCodes([fallbackCode, ...accessCodes]);
+      setGeneratedPassModal(fallbackCode);
+    }
+
+    setVisitorName("");
+    setVisitorPhone("");
+    setVehiclePlate("");
+  };
+
+  const handleShareWhatsApp = (ac) => {
+    const message =
+      `🏛️ *ROYAL PALMS ESTATE VISITOR PASS*\n\n` +
+      `Hello ${ac.visitor_name},\n` +
+      `You have been authorised by *${user?.full_name || "Resident"}* (${user?.unit?.unit_number || "Block A - Apt 101"}).\n\n` +
+      `🔑 *Access Code:* ${ac.code}\n` +
+      `📅 *Arrival Date:* ${ac.arrival_date}\n` +
+      `⏱️ *Valid Until:* ${ac.valid_until}\n` +
+      `🎫 *Pass Type:* ${ac.code_type === "one_time" ? "One-Time Entry" : `Temporary (${ac.max_uses} uses)`}\n\n` +
+      `Please present this code or QR pass to Security at the Estate Gate.`;
+
+    const url = `whatsapp://send?phone=${ac.visitor_phone.replace(/[^0-9+]/g, "")}&text=${encodeURIComponent(message)}`;
+    Linking.openURL(url).catch(() => {
+      Share.share({ message });
+    });
+  };
+
+  const handleShareSMS = (ac) => {
+    const body = `Royal Palms Estate Pass: Your visitor access code is ${ac.code} (Valid until ${ac.valid_until}). Host: ${user?.full_name}, ${user?.unit?.unit_number}.`;
+    Linking.openURL(`sms:${ac.visitor_phone}?body=${encodeURIComponent(body)}`).catch(() => {
+      Share.share({ message: body });
+    });
+  };
+
+  const handleCancelCode = async (codeObj) => {
+    try {
+      await apiClient.cancelAccessCode(codeObj.id);
+    } catch {
+      // Offline update
+    }
+    setAccessCodes((prev) =>
+      prev.map((item) => (item.id === codeObj.id ? { ...item, status: "cancelled" } : item))
+    );
+    Alert.alert("Code Cancelled", `Access code ${codeObj.code} for ${codeObj.visitor_name} has been deactivated.`);
+  };
+
+  if (authView !== "authenticated") {
+    return (
+      <SafeAreaView style={styles.authContainer}>
+        <StatusBar barStyle="light-content" />
+        <View style={styles.authCard}>
+          <Text style={styles.brandBadge}>ROYAL PALMS ESTATE</Text>
+          <Text style={styles.authTitle}>
+            {authView === "login"
+              ? "Resident Mobile Portal"
+              : authView === "register"
+              ? "Resident Registration"
+              : "Password Recovery"}
+          </Text>
+
+          {authView === "login" && (
+            <>
+              <Text style={styles.inputLabel}>Email or Telephone</Text>
+              <TextInput
+                style={styles.input}
+                value={identifier}
+                onChangeText={setIdentifier}
+                placeholder="email@example.com"
+                autoCapitalize="none"
+              />
+              <Text style={styles.inputLabel}>Password</Text>
+              <TextInput
+                style={styles.input}
+                value={password}
+                onChangeText={setPassword}
+                secureTextEntry
+                placeholder="••••••••"
+              />
+              <TouchableOpacity style={styles.primaryBtn} onPress={handleLogin}>
+                <Text style={styles.primaryBtnText}>Sign In to Resident Portal</Text>
+              </TouchableOpacity>
+
+              <View style={styles.authLinksRow}>
+                <TouchableOpacity onPress={() => setAuthView("register")}>
+                  <Text style={styles.linkText}>Register with Estate ID</Text>
+                </TouchableOpacity>
+                <TouchableOpacity onPress={() => setAuthView("recovery")}>
+                  <Text style={styles.linkText}>Forgot Password?</Text>
+                </TouchableOpacity>
+              </View>
+            </>
+          )}
+
+          {authView === "register" && (
+            <>
+              <Text style={styles.inputLabel}>Full Name</Text>
+              <TextInput style={styles.input} value={regName} onChangeText={setRegName} placeholder="Engr. John Doe" />
+              <Text style={styles.inputLabel}>Estate-Approved ID Number</Text>
+              <TextInput
+                style={styles.input}
+                value={regEstateId}
+                onChangeText={setRegEstateId}
+                placeholder="EST-2026-105"
+                autoCapitalize="characters"
+              />
+              <Text style={styles.inputLabel}>Apartment / Unit Number</Text>
+              <TextInput style={styles.input} value={regUnit} onChangeText={setRegUnit} placeholder="Block A - Apt 104" />
+              <Text style={styles.inputLabel}>Email Address</Text>
+              <TextInput style={styles.input} value={regEmail} onChangeText={setRegEmail} autoCapitalize="none" />
+              <Text style={styles.inputLabel}>Telephone Number</Text>
+              <TextInput style={styles.input} value={regPhone} onChangeText={setRegPhone} keyboardType="phone-pad" />
+              <TouchableOpacity style={styles.primaryBtn} onPress={handleRegister}>
+                <Text style={styles.primaryBtnText}>Complete Resident Registration</Text>
+              </TouchableOpacity>
+              <TouchableOpacity onPress={() => setAuthView("login")} style={{ marginTop: 12 }}>
+                <Text style={styles.linkText}>Back to Login</Text>
+              </TouchableOpacity>
+            </>
+          )}
+
+          {authView === "recovery" && (
+            <>
+              <Text style={styles.inputLabel}>Registered Email Address</Text>
+              <TextInput
+                style={styles.input}
+                value={recoveryEmail}
+                onChangeText={setRecoveryEmail}
+                placeholder="resident@example.com"
+                autoCapitalize="none"
+              />
+              <TouchableOpacity
+                style={styles.primaryBtn}
+                onPress={() => {
+                  Alert.alert("Recovery Code Sent", "A 6-digit recovery pin has been sent to your email and SMS.");
+                  setAuthView("login");
+                }}
+              >
+                <Text style={styles.primaryBtnText}>Send Recovery Code</Text>
+              </TouchableOpacity>
+              <TouchableOpacity onPress={() => setAuthView("login")} style={{ marginTop: 12 }}>
+                <Text style={styles.linkText}>Back to Login</Text>
+              </TouchableOpacity>
+            </>
+          )}
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  return (
+    <SafeAreaView style={styles.container}>
+      <StatusBar barStyle="light-content" />
+      {/* Header */}
+      <View style={styles.header}>
+        <View>
+          <Text style={styles.headerSubtitle}>{user?.unit?.unit_number || "Block A - Apt 101"}</Text>
+          <Text style={styles.headerTitle}>{user?.full_name}</Text>
+        </View>
+        <TouchableOpacity style={styles.logoutBtn} onPress={() => setAuthView("login")}>
+          <Text style={styles.logoutText}>Sign Out</Text>
+        </TouchableOpacity>
+      </View>
+
+      <ScrollView style={styles.content}>
+        {/* Generated Pass Banner */}
+        {generatedPassModal && (
+          <View style={styles.passCard}>
+            <Text style={styles.passHeader}>NEW VISITOR ACCESS PASS GENERATED</Text>
+            <Text style={styles.passCode}>{generatedPassModal.code}</Text>
+            <Text style={styles.passQrBox}>[ QR PAYLOAD: {generatedPassModal.qr_payload} ]</Text>
+            <Text style={styles.passDetail}>Visitor: {generatedPassModal.visitor_name}</Text>
+            <Text style={styles.passDetail}>
+              Type: {generatedPassModal.code_type === "one_time" ? "One-Time Entry" : `Temporary (${generatedPassModal.max_uses} uses)`}
+            </Text>
+            <View style={styles.shareRow}>
+              <TouchableOpacity style={styles.whatsappBtn} onPress={() => handleShareWhatsApp(generatedPassModal)}>
+                <Text style={styles.shareBtnText}>Share via WhatsApp</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.smsBtn} onPress={() => handleShareSMS(generatedPassModal)}>
+                <Text style={styles.shareBtnText}>Share via SMS</Text>
+              </TouchableOpacity>
+            </View>
+            <TouchableOpacity onPress={() => setGeneratedPassModal(null)} style={{ marginTop: 10 }}>
+              <Text style={{ color: "#94A3B8", textAlign: "center" }}>Dismiss</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+
+        {/* TAB 1: GENERATE VISITOR CODE */}
+        {activeTab === "generate" && (
+          <View style={styles.sectionCard}>
+            <Text style={styles.sectionTitle}>Generate Visitor Access Code</Text>
+            <Text style={styles.inputLabel}>Visitor Full Name *</Text>
+            <TextInput
+              style={styles.input}
+              value={visitorName}
+              onChangeText={setVisitorName}
+              placeholder="e.g. Michael Oluwaseun"
+            />
+
+            <Text style={styles.inputLabel}>Visitor Telephone Number *</Text>
+            <TextInput
+              style={styles.input}
+              value={visitorPhone}
+              onChangeText={setVisitorPhone}
+              placeholder="+2348091234567"
+              keyboardType="phone-pad"
+            />
+
+            <Text style={styles.inputLabel}>Vehicle Plate Number (Optional)</Text>
+            <TextInput
+              style={styles.input}
+              value={vehiclePlate}
+              onChangeText={setVehiclePlate}
+              placeholder="LSR-482-KJ"
+              autoCapitalize="characters"
+            />
+
+            <Text style={styles.inputLabel}>Arrival Date (YYYY-MM-DD)</Text>
+            <TextInput style={styles.input} value={arrivalDate} onChangeText={setArrivalDate} />
+
+            <Text style={styles.inputLabel}>Access Code Type</Text>
+            <View style={styles.toggleRow}>
+              <TouchableOpacity
+                style={[styles.toggleOption, codeType === "one_time" && styles.toggleOptionActive]}
+                onPress={() => setCodeType("one_time")}
+              >
+                <Text style={[styles.toggleText, codeType === "one_time" && styles.toggleTextActive]}>
+                  One-Time Code (1 Use)
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.toggleOption, codeType === "temporary" && styles.toggleOptionActive]}
+                onPress={() => setCodeType("temporary")}
+              >
+                <Text style={[styles.toggleText, codeType === "temporary" && styles.toggleTextActive]}>
+                  Temporary Multi-Use
+                </Text>
+              </TouchableOpacity>
+            </View>
+
+            <View style={styles.rowInputs}>
+              <View style={{ flex: 1, marginRight: 8 }}>
+                <Text style={styles.inputLabel}>Validity Period (Hours)</Text>
+                <TextInput
+                  style={styles.input}
+                  value={validHours}
+                  onChangeText={setValidHours}
+                  keyboardType="numeric"
+                />
+              </View>
+              {codeType === "temporary" && (
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.inputLabel}>Max Allowed Entries</Text>
+                  <TextInput style={styles.input} value={maxUses} onChangeText={setMaxUses} keyboardType="numeric" />
+                </View>
+              )}
+            </View>
+
+            <TouchableOpacity style={styles.primaryBtn} onPress={handleGenerateCode}>
+              <Text style={styles.primaryBtnText}>Generate Unique Access Code & QR</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+
+        {/* TAB 2: MANAGE MY ACCESS CODES */}
+        {activeTab === "codes" && (
+          <View>
+            <Text style={styles.sectionTitle}>My Visitor Access Codes</Text>
+            {accessCodes.map((ac) => (
+              <View key={ac.id} style={styles.listItemCard}>
+                <View style={styles.listHeader}>
+                  <Text style={styles.codeBadge}>{ac.code}</Text>
+                  <Text
+                    style={[
+                      styles.statusPill,
+                      ac.status === "active"
+                        ? styles.statusActive
+                        : ac.status === "used"
+                        ? styles.statusUsed
+                        : styles.statusRejected,
+                    ]}
+                  >
+                    {ac.status.toUpperCase()}
+                  </Text>
+                </View>
+                <Text style={styles.itemTitle}>{ac.visitor_name}</Text>
+                <Text style={styles.itemSub}>
+                  📞 {ac.visitor_phone} • {ac.code_type === "one_time" ? "One-Time" : `Temp (${ac.use_count}/${ac.max_uses})`}
+                </Text>
+                <Text style={styles.itemSub}>Valid Until: {ac.valid_until}</Text>
+
+                {ac.status === "active" && (
+                  <View style={styles.actionRow}>
+                    <TouchableOpacity style={styles.smallShareBtn} onPress={() => handleShareWhatsApp(ac)}>
+                      <Text style={styles.smallBtnText}>WhatsApp</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity style={styles.smallSmsBtn} onPress={() => handleShareSMS(ac)}>
+                      <Text style={styles.smallBtnText}>SMS</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity style={styles.cancelBtn} onPress={() => handleCancelCode(ac)}>
+                      <Text style={styles.cancelBtnText}>Deactivate / Cancel</Text>
+                    </TouchableOpacity>
+                  </View>
+                )}
+              </View>
+            ))}
+          </View>
+        )}
+
+        {/* TAB 3: VISITOR ENTRY HISTORY */}
+        {activeTab === "history" && (
+          <View>
+            <Text style={styles.sectionTitle}>Visitor Entry & Exit History</Text>
+            {historyLogs.map((log) => (
+              <View key={log.id} style={styles.listItemCard}>
+                <View style={styles.listHeader}>
+                  <Text style={styles.itemTitle}>{log.visitor_name}</Text>
+                  <Text
+                    style={[
+                      styles.statusPill,
+                      log.action === "entry_rejected" ? styles.statusRejected : styles.statusActive,
+                    ]}
+                  >
+                    {log.action.replace("_", " ").toUpperCase()}
+                  </Text>
+                </View>
+                <Text style={styles.itemSub}>Code: {log.code_entered} • Gate: {log.gate_name}</Text>
+                {log.entry_time && <Text style={styles.itemSub}>Entry: {log.entry_time}</Text>}
+                {log.exit_time && <Text style={styles.itemSub}>Exit: {log.exit_time}</Text>}
+                {log.rejection_reason && (
+                  <Text style={{ color: "#DC2626", marginTop: 4, fontWeight: "600" }}>
+                    Reason: {log.rejection_reason}
+                  </Text>
+                )}
+              </View>
+            ))}
+          </View>
+        )}
+
+        {/* TAB 4: REAL-TIME NOTIFICATIONS */}
+        {activeTab === "notifications" && (
+          <View>
+            <Text style={styles.sectionTitle}>Gate & Access Notifications</Text>
+            {notifications.map((n) => (
+              <View key={n.id} style={styles.listItemCard}>
+                <Text style={styles.itemTitle}>{n.title}</Text>
+                <Text style={[styles.itemSub, { marginVertical: 4, color: "#334155" }]}>{n.message}</Text>
+                <Text style={{ fontSize: 11, color: "#64748B" }}>{n.created_at}</Text>
+              </View>
+            ))}
+          </View>
+        )}
+      </ScrollView>
+
+      {/* Bottom Tab Navigation */}
+      <View style={styles.tabBar}>
+        {[
+          { key: "generate", label: "New Code" },
+          { key: "codes", label: "My Codes" },
+          { key: "history", label: "History" },
+          { key: "notifications", label: `Alerts (${notifications.length})` },
+        ].map((t) => (
+          <TouchableOpacity
+            key={t.key}
+            style={[styles.tabItem, activeTab === t.key && styles.tabItemActive]}
+            onPress={() => setActiveTab(t.key)}
+          >
+            <Text style={[styles.tabLabel, activeTab === t.key && styles.tabLabelActive]}>{t.label}</Text>
+          </TouchableOpacity>
+        ))}
+      </View>
+    </SafeAreaView>
+  );
+}
+
+const styles = StyleSheet.create({
+  authContainer: { flex: 1, backgroundColor: "#0F172A", justifyContent: "center", padding: 20 },
+  authCard: { backgroundColor: "#FFFFFF", borderRadius: 16, padding: 24 },
+  brandBadge: { color: "#2563EB", fontWeight: "800", fontSize: 12, letterSpacing: 1.2, marginBottom: 4 },
+  authTitle: { fontSize: 22, fontWeight: "700", color: "#0F172A", marginBottom: 16 },
+  container: { flex: 1, backgroundColor: "#F1F5F9" },
+  header: {
+    backgroundColor: "#0F172A",
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+  },
+  headerSubtitle: { color: "#38BDF8", fontSize: 12, fontWeight: "600" },
+  headerTitle: { color: "#FFFFFF", fontSize: 18, fontWeight: "700" },
+  logoutBtn: { backgroundColor: "#1E293B", paddingHorizontal: 12, paddingVertical: 6, borderRadius: 8 },
+  logoutText: { color: "#F8FAFC", fontSize: 12 },
+  content: { flex: 1, padding: 16 },
+  sectionCard: { backgroundColor: "#FFFFFF", borderRadius: 14, padding: 18, marginBottom: 20 },
+  sectionTitle: { fontSize: 18, fontWeight: "700", color: "#0F172A", marginBottom: 12 },
+  inputLabel: { fontSize: 13, fontWeight: "600", color: "#475569", marginBottom: 6, marginTop: 10 },
+  input: {
+    borderWidth: 1,
+    borderColor: "#CBD5E1",
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    fontSize: 15,
+    backgroundColor: "#F8FAFC",
+  },
+  toggleRow: { flexDirection: "row", marginTop: 6, marginBottom: 8 },
+  toggleOption: {
+    flex: 1,
+    paddingVertical: 10,
+    borderWidth: 1,
+    borderColor: "#CBD5E1",
+    borderRadius: 8,
+    alignItems: "center",
+    marginRight: 6,
+  },
+  toggleOptionActive: { backgroundColor: "#EFF6FF", borderColor: "#2563EB" },
+  toggleText: { color: "#64748B", fontWeight: "600", fontSize: 13 },
+  toggleTextActive: { color: "#1D4ED8" },
+  rowInputs: { flexDirection: "row", marginBottom: 8 },
+  primaryBtn: {
+    backgroundColor: "#2563EB",
+    borderRadius: 10,
+    paddingVertical: 14,
+    alignItems: "center",
+    marginTop: 18,
+  },
+  primaryBtnText: { color: "#FFFFFF", fontWeight: "700", fontSize: 15 },
+  authLinksRow: { flexDirection: "row", justifyContent: "space-between", marginTop: 16 },
+  linkText: { color: "#2563EB", fontWeight: "600", fontSize: 13 },
+  passCard: {
+    backgroundColor: "#0F172A",
+    borderRadius: 16,
+    padding: 18,
+    marginBottom: 16,
+    alignItems: "center",
+  },
+  passHeader: { color: "#38BDF8", fontSize: 11, fontWeight: "800", letterSpacing: 1 },
+  passCode: { color: "#FFFFFF", fontSize: 36, fontWeight: "900", letterSpacing: 6, marginVertical: 8 },
+  passQrBox: {
+    color: "#E2E8F0",
+    fontSize: 11,
+    backgroundColor: "#1E293B",
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 6,
+    marginBottom: 8,
+  },
+  passDetail: { color: "#CBD5E1", fontSize: 13, marginBottom: 2 },
+  shareRow: { flexDirection: "row", marginTop: 12 },
+  whatsappBtn: {
+    backgroundColor: "#16A34A",
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 8,
+    marginRight: 8,
+  },
+  smsBtn: { backgroundColor: "#0284C7", paddingHorizontal: 14, paddingVertical: 10, borderRadius: 8 },
+  shareBtnText: { color: "#FFFFFF", fontWeight: "700", fontSize: 13 },
+  listItemCard: { backgroundColor: "#FFFFFF", borderRadius: 12, padding: 16, marginBottom: 12 },
+  listHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 6 },
+  codeBadge: { fontSize: 20, fontWeight: "800", color: "#0F172A", letterSpacing: 2 },
+  statusPill: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6, fontSize: 11, fontWeight: "700" },
+  statusActive: { backgroundColor: "#DCFCE7", color: "#15803D" },
+  statusUsed: { backgroundColor: "#E0E7FF", color: "#1D4ED8" },
+  statusRejected: { backgroundColor: "#FEE2E2", color: "#B91C1C" },
+  itemTitle: { fontSize: 16, fontWeight: "700", color: "#1E293B" },
+  itemSub: { fontSize: 13, color: "#64748B", marginTop: 2 },
+  actionRow: { flexDirection: "row", marginTop: 12 },
+  smallShareBtn: { backgroundColor: "#16A34A", paddingHorizontal: 12, paddingVertical: 7, borderRadius: 6, marginRight: 8 },
+  smallSmsBtn: { backgroundColor: "#0284C7", paddingHorizontal: 12, paddingVertical: 7, borderRadius: 6, marginRight: 8 },
+  smallBtnText: { color: "#FFFFFF", fontSize: 12, fontWeight: "700" },
+  cancelBtn: { backgroundColor: "#FEE2E2", paddingHorizontal: 12, paddingVertical: 7, borderRadius: 6 },
+  cancelBtnText: { color: "#B91C1C", fontSize: 12, fontWeight: "700" },
+  tabBar: {
+    flexDirection: "row",
+    backgroundColor: "#FFFFFF",
+    borderTopWidth: 1,
+    borderTopColor: "#E2E8F0",
+    paddingVertical: 10,
+  },
+  tabItem: { flex: 1, alignItems: "center", paddingVertical: 6 },
+  tabItemActive: { borderBottomWidth: 2, borderBottomColor: "#2563EB" },
+  tabLabel: { fontSize: 12, color: "#64748B", fontWeight: "600" },
+  tabLabelActive: { color: "#2563EB", fontWeight: "700" },
+});

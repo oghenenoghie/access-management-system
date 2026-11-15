@@ -1,0 +1,330 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Estate Gate Access System — End-to-End Interactive Suite</title>
+  <style>
+    :root {
+      --bg: #f1f5f9;
+      --navy: #0f172a;
+      --blue: #2563eb;
+      --green: #16a34a;
+      --red: #dc2626;
+      --amber: #d97706;
+      --card: #ffffff;
+      --border: #e2e8f0;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: system-ui, -apple-system, sans-serif; }
+    body { background: var(--bg); color: var(--navy); }
+    header {
+      background: var(--navy);
+      color: #fff;
+      padding: 16px 28px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .mode-switcher { display: flex; gap: 8px; }
+    .mode-btn {
+      padding: 9px 16px;
+      border-radius: 8px;
+      border: 1px solid #334155;
+      background: #1e293b;
+      color: #cbd5e1;
+      cursor: pointer;
+      font-weight: 600;
+      font-size: 13px;
+    }
+    .mode-btn.active { background: var(--blue); color: #fff; border-color: var(--blue); }
+    main { max-width: 1280px; margin: 24px auto; padding: 0 20px; }
+    .grid-2 { display: grid; grid-template-columns: 390px 1fr; gap: 24px; }
+    .phone-frame {
+      background: #fff;
+      border: 8px solid var(--navy);
+      border-radius: 32px;
+      overflow: hidden;
+      box-shadow: 0 12px 30px rgba(15,23,42,0.12);
+    }
+    .phone-header { background: var(--navy); color: #fff; padding: 18px; }
+    .phone-body { padding: 18px; }
+    .card {
+      background: var(--card);
+      border-radius: 14px;
+      padding: 20px;
+      border: 1px solid var(--border);
+      margin-bottom: 18px;
+    }
+    label { display: block; font-size: 12px; font-weight: 700; color: #475569; margin: 10px 0 4px; }
+    input, select {
+      width: 100%;
+      padding: 10px 12px;
+      border: 1px solid #cbd5e1;
+      border-radius: 8px;
+      font-size: 14px;
+    }
+    .btn {
+      padding: 11px 16px;
+      border-radius: 8px;
+      border: none;
+      font-weight: 700;
+      cursor: pointer;
+      font-size: 13px;
+    }
+    .btn-primary { background: var(--blue); color: #fff; width: 100%; margin-top: 14px; }
+    .btn-green { background: var(--green); color: #fff; }
+    .btn-red { background: var(--red); color: #fff; }
+    .badge {
+      display: inline-block;
+      padding: 3px 8px;
+      border-radius: 6px;
+      font-size: 11px;
+      font-weight: 800;
+    }
+    .b-active { background: #dcfce7; color: #15803d; }
+    .b-used { background: #dbeafe; color: #1d4ed8; }
+    .b-expired, .b-cancelled, .b-rejected { background: #fee2e2; color: #b91c1c; }
+    table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+    th, td { text-align: left; padding: 10px; border-bottom: 1px solid var(--border); font-size: 13px; }
+    th { color: #475569; font-weight: 700; }
+  </style>
+</head>
+<body>
+  <header>
+    <div>
+      <div style="font-size:11px;color:#38bdf8;font-weight:800;letter-spacing:1px;">ROYAL PALMS ESTATE ACCESS PLATFORM</div>
+      <div style="font-size:18px;font-weight:700;">Unified Live Sandbox (Resident App + Security Gate + Admin Dashboard)</div>
+    </div>
+    <div class="mode-switcher">
+      <button class="mode-btn active" onclick="switchView('all', this)">Split View (All 3 Modules)</button>
+      <button class="mode-btn" onclick="switchView('admin', this)">Estate Admin Dashboard</button>
+    </div>
+  </header>
+
+  <main>
+    <div class="grid-2" id="splitView">
+      <!-- LEFT: RESIDENT MOBILE APP (EXPO) -->
+      <div class="phone-frame">
+        <div class="phone-header">
+          <div style="font-size:11px;color:#38bdf8;font-weight:700;">RESIDENT MOBILE APP (REACT NATIVE EXPO)</div>
+          <div style="font-size:17px;font-weight:700;margin-top:2px;">Engr. Adewale Banjo</div>
+          <div style="font-size:12px;color:#cbd5e1;">Block A - Apt 101 • Estate ID: EST-2026-101</div>
+        </div>
+        <div class="phone-body">
+          <h4 style="margin-bottom:8px;">Generate Visitor Access Code</h4>
+          <label>Visitor Full Name</label>
+          <input id="vName" placeholder="e.g. Chinedu Eze" value="Chinedu Eze" />
+          <label>Visitor Phone Number</label>
+          <input id="vPhone" placeholder="+2348090001122" value="+2348090001122" />
+          <label>Pass Type & Validity</label>
+          <select id="vType">
+            <option value="one_time">One-Time Entry Code (Invalidates after 1 use)</option>
+            <option value="temporary">Temporary Multi-Entry Pass (4 uses / 24h)</option>
+          </select>
+          <button class="btn btn-primary" onclick="generateVisitorCode()">Generate Unique Code & QR Pass</button>
+
+          <h4 style="margin:18px 0 8px;">My Active & Recent Codes</h4>
+          <div id="residentCodesList"></div>
+
+          <h4 style="margin:18px 0 8px;">Live Resident Push Notifications</h4>
+          <div id="residentNotifsList"></div>
+        </div>
+      </div>
+
+      <!-- RIGHT: SECURITY GATE ANDROID INTERFACE (FLUTTER) + ADMIN MONITOR -->
+      <div>
+        <div class="card" style="border-left: 5px solid var(--blue);">
+          <div style="display:flex;justify-content:space-between;align-items:center;">
+            <div>
+              <div style="font-size:11px;font-weight:800;color:var(--blue);">SECURITY PERSONNEL GATE INTERFACE (FLUTTER ANDROID)</div>
+              <h3 style="margin-top:2px;">Main North Gate — Real-Time Code & QR Verification</h3>
+            </div>
+            <span class="badge b-active">Officer Samuel Okafor</span>
+          </div>
+          <div style="display:flex;gap:10px;margin-top:14px;">
+            <input id="gateCodeInput" placeholder="Enter 6-Digit Access Code (e.g. 482910)" style="font-size:18px;font-weight:800;letter-spacing:3px;" value="482910" />
+            <button class="btn btn-green" style="white-space:nowrap;" onclick="verifyAtGate()">Verify & Inspect Code</button>
+          </div>
+          <div id="gateVerifyResult" style="margin-top:14px;"></div>
+        </div>
+
+        <div class="card">
+          <h3>Estate Management Administration — Electronic Gate Records & Active Visitors</h3>
+          <table>
+            <thead>
+              <tr>
+                <th>Access Code</th>
+                <th>Visitor</th>
+                <th>Host Resident & Unit</th>
+                <th>Entry Time</th>
+                <th>Exit Time</th>
+                <th>Gate Status</th>
+                <th>Action</th>
+              </tr>
+            </thead>
+            <tbody id="gateLogsTable"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <script>
+    const state = {
+      codes: [
+        { id: 1, code: "482910", visitor_name: "Michael Oluwaseun", visitor_phone: "+2348091234567", resident: "Engr. Adewale Banjo", unit: "Block A - Apt 101", type: "one_time", uses: 0, max: 1, status: "active", valid_until: "Today 19:30" },
+        { id: 2, code: "510293", visitor_name: "DHL Express Courier", visitor_phone: "+2348050009999", resident: "Engr. Adewale Banjo", unit: "Block A - Apt 101", type: "one_time", uses: 1, max: 1, status: "used", valid_until: "Today 14:00" },
+        { id: 3, code: "194822", visitor_name: "Grace Adebayo", visitor_phone: "+2348071112233", resident: "Engr. Adewale Banjo", unit: "Block A - Apt 101", type: "one_time", uses: 0, max: 1, status: "expired", valid_until: "Yesterday 20:00" }
+      ],
+      logs: [
+        { id: 10, code: "510293", visitor: "DHL Express Courier", resident: "Engr. Adewale Banjo (Block A - Apt 101)", entry: "09:30 AM", exit: "09:55 AM", status: "EXIT RECORDED" },
+        { id: 11, code: "194822", visitor: "Grace Adebayo", resident: "Engr. Adewale Banjo (Block A - Apt 101)", entry: "08:15 AM", exit: "-", status: "REJECTED (EXPIRED)" }
+      ],
+      notifs: [
+        "Visitor DHL Express Courier admitted at Main North Gate (Code 510293).",
+        "Alert: Visitor Grace Adebayo presented expired code 194822 at South Gate."
+      ]
+    };
+
+    function generateVisitorCode() {
+      const name = document.getElementById("vName").value.trim();
+      const phone = document.getElementById("vPhone").value.trim();
+      const type = document.getElementById("vType").value;
+      if (!name) return alert("Enter visitor name");
+      const newCode = String(Math.floor(100000 + Math.random() * 900000));
+      state.codes.unshift({
+        id: Date.now(),
+        code: newCode,
+        visitor_name: name,
+        visitor_phone: phone,
+        resident: "Engr. Adewale Banjo",
+        unit: "Block A - Apt 101",
+        type,
+        uses: 0,
+        max: type === "one_time" ? 1 : 4,
+        status: "active",
+        valid_until: "Today +12h"
+      });
+      document.getElementById("gateCodeInput").value = newCode;
+      state.notifs.unshift(`Generated ${type} code ${newCode} for ${name}. Ready to share via WhatsApp/SMS.`);
+      renderAll();
+    }
+
+    function cancelCode(codeStr) {
+      const found = state.codes.find(c => c.code === codeStr);
+      if (found) {
+        found.status = "cancelled";
+        state.notifs.unshift(`You cancelled access code ${codeStr} for ${found.visitor_name}.`);
+        renderAll();
+      }
+    }
+
+    function verifyAtGate() {
+      const input = document.getElementById("gateCodeInput").value.trim();
+      const box = document.getElementById("gateVerifyResult");
+      const found = state.codes.find(c => c.code === input);
+
+      if (!found) {
+        box.innerHTML = `<div style="padding:14px;background:#fee2e2;border-radius:10px;color:#991b1b;font-weight:700;">❌ REJECTED: Code "${input}" is invalid / unrecognized.</div>`;
+        state.logs.unshift({ id: Date.now(), code: input, visitor: "Unknown", resident: "-", entry: new Date().toLocaleTimeString(), exit: "-", status: "REJECTED (INVALID)" });
+        renderAll();
+        return;
+      }
+
+      if (found.status !== "active") {
+        box.innerHTML = `<div style="padding:14px;background:#fee2e2;border-radius:10px;color:#991b1b;font-weight:700;">❌ REJECTED: Code ${found.code} for ${found.visitor_name} is ${found.status.toUpperCase()}. Entry denied.</div>`;
+        state.logs.unshift({ id: Date.now(), code: found.code, visitor: found.visitor_name, resident: `${found.resident} (${found.unit})`, entry: new Date().toLocaleTimeString(), exit: "-", status: `REJECTED (${found.status.toUpperCase()})` });
+        state.notifs.unshift(`Security Alert: ${found.visitor_name} presented ${found.status} code ${found.code} at Main Gate.`);
+        renderAll();
+        return;
+      }
+
+      box.innerHTML = `
+        <div style="padding:16px;background:#dcfce7;border:2px solid #16a34a;border-radius:10px;">
+          <div style="font-weight:800;color:#15803d;font-size:15px;">✅ VALID ACCESS CODE — AUTHORISED VISIT</div>
+          <div style="margin-top:6px;font-size:13px;">
+            <b>Visitor:</b> ${found.visitor_name} (${found.visitor_phone})<br/>
+            <b>Authorised By Resident:</b> ${found.resident} • <b>Unit:</b> ${found.unit}<br/>
+            <b>Pass Type:</b> ${found.type} (${found.uses}/${found.max} uses)
+          </div>
+          <button class="btn btn-green" style="margin-top:10px;" onclick="admitVisitor('${found.code}')">Grant Gate Entry & Record Arrival</button>
+        </div>
+      `;
+    }
+
+    function admitVisitor(codeStr) {
+      const found = state.codes.find(c => c.code === codeStr);
+      if (!found) return;
+      found.uses += 1;
+      if (found.type === "one_time" || found.uses >= found.max) {
+        found.status = "used";
+      }
+      const now = new Date().toLocaleTimeString();
+      state.logs.unshift({
+        id: Date.now(),
+        code: found.code,
+        visitor: found.visitor_name,
+        resident: `${found.resident} (${found.unit})`,
+        entry: now,
+        exit: null,
+        status: "INSIDE ESTATE"
+      });
+      state.notifs.unshift(`Visitor Admitted: ${found.visitor_name} entered via Main North Gate at ${now} (Code ${found.code}).`);
+      document.getElementById("gateVerifyResult").innerHTML = "";
+      renderAll();
+    }
+
+    function recordExit(logId) {
+      const log = state.logs.find(l => l.id === logId);
+      if (log) {
+        log.exit = new Date().toLocaleTimeString();
+        log.status = "EXIT RECORDED";
+        state.notifs.unshift(`Visitor Departed: ${log.visitor} exited the estate at ${log.exit}.`);
+        renderAll();
+      }
+    }
+
+    function renderAll() {
+      document.getElementById("residentCodesList").innerHTML = state.codes.map(c => `
+        <div style="padding:10px;border:1px solid #e2e8f0;border-radius:8px;margin-bottom:8px;font-size:12px;">
+          <div style="display:flex;justify-content:space-between;align-items:center;">
+            <strong style="font-size:16px;letter-spacing:2px;">${c.code}</strong>
+            <span class="badge b-${c.status}">${c.status.toUpperCase()}</span>
+          </div>
+          <div><b>${c.visitor_name}</b> (${c.visitor_phone})</div>
+          <div style="color:#64748b;">${c.type} • Uses: ${c.uses}/${c.max}</div>
+          ${c.status === "active" ? `
+            <div style="margin-top:6px;display:flex;gap:6px;">
+              <button class="btn btn-green" style="padding:4px 8px;font-size:11px;" onclick="alert('Shared code ${c.code} via WhatsApp to ${c.visitor_name}')">WhatsApp</button>
+              <button class="btn btn-red" style="padding:4px 8px;font-size:11px;" onclick="cancelCode('${c.code}')">Cancel Code</button>
+            </div>
+          ` : ""}
+        </div>
+      `).join("");
+
+      document.getElementById("residentNotifsList").innerHTML = state.notifs.slice(0, 4).map(n => `
+        <div style="padding:8px 10px;background:#f8fafc;border-left:3px solid #2563eb;margin-bottom:6px;font-size:12px;">${n}</div>
+      `).join("");
+
+      document.getElementById("gateLogsTable").innerHTML = state.logs.map(l => `
+        <tr>
+          <td><strong>${l.code}</strong></td>
+          <td>${l.visitor}</td>
+          <td>${l.resident}</td>
+          <td>${l.entry}</td>
+          <td>${l.exit || "-"}</td>
+          <td><span class="badge ${l.status.includes('REJECTED') ? 'b-rejected' : l.exit ? 'b-used' : 'b-active'}">${l.status}</span></td>
+          <td>${!l.exit && !l.status.includes('REJECTED') ? `<button class="btn btn-green" style="padding:5px 10px;font-size:11px;" onclick="recordExit(${l.id})">Record Exit</button>` : "-"}</td>
+        </tr>
+      `).join("");
+    }
+
+    function switchView(mode, btn) {
+      document.querySelectorAll(".mode-btn").forEach(b => b.classList.remove("active"));
+      btn.classList.add("active");
+    }
+
+    renderAll();
+  </script>
+</body>
+</html>
