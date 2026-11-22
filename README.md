@@ -99,6 +99,10 @@ npx expo start --android
 ### 5. Run the Flutter Android Security Gate App
 ```bash
 cd mobile-flutter
+flutter create --platforms=android --org com.royalpalms --project-name estate_gate_access_flutter .   # once only
 flutter pub get
 flutter run
 ```
+
+### 6. Test on a real Android phone
+Both apps default to `10.0.2.2`, which only works in the Android emulator. To use a physical phone, see [docs/PHONE_TESTING.md](docs/PHONE_TESTING.md).

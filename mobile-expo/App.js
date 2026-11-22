@@ -123,8 +123,13 @@ export default function App() {
       setUser(res.user);
       setAuthView("authenticated");
       refreshResidentData();
-    } catch {
+    } catch (err) {
       // Fallback to seeded demo resident if backend server is offline
+      Alert.alert(
+        "Offline demo mode",
+        `Sign-in through ${apiClient.baseUrl} failed (${err.message}). ` +
+          "Showing built-in demo data. Passes you create now won't reach the gate app."
+      );
       setUser({
         id: 4,
         full_name: "Engr. Adewale Banjo",

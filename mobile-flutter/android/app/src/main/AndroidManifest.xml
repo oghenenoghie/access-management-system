@@ -1,5 +1,4 @@
-<manifest xmlns:android="http://schemas.android.com/apk/res/android"
-    package="com.royalpalms.estatesecurity">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <!-- Required permissions for Cloud API, QR Code Camera Scanner, and Push Notifications -->
     <uses-permission android:name="android.permission.INTERNET" />

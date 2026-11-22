@@ -34,7 +34,15 @@ class SecurityGateHomeScreen extends StatefulWidget {
 }
 
 class _SecurityGateHomeScreenState extends State<SecurityGateHomeScreen> {
-  final String apiBase = 'http://10.0.2.2:8000';
+  // Pass --dart-define=API_BASE_URL=http://<PC LAN IP>:8000 to test on a real
+  // phone. The default 10.0.2.2 only reaches the PC from the Android emulator.
+  static const String _apiBaseRaw = String.fromEnvironment(
+    'API_BASE_URL',
+    defaultValue: 'http://10.0.2.2:8000',
+  );
+  final String apiBase = _apiBaseRaw.endsWith('/')
+      ? _apiBaseRaw.substring(0, _apiBaseRaw.length - 1)
+      : _apiBaseRaw;
   bool isAuthenticated = false;
   String officerName = 'Officer Samuel Okafor';
   String selectedGate = 'Main North Gate';
@@ -90,8 +98,88 @@ class _SecurityGateHomeScreenState extends State<SecurityGateHomeScreen> {
     },
   ];
 
+  /// Signed in through the backend. When true the server is the source of
+  /// truth for verification, admissions, exits and the logbook; when false the
+  /// app runs on the built-in demo data only.
+  bool get _isOnline => jwtToken != null;
+
+  Map<String, String> get _authHeaders => {
+        'Content-Type': 'application/json',
+        if (jwtToken != null) 'Authorization': 'Bearer $jwtToken',
+      };
+
+  String _serverError(http.Response resp) {
+    try {
+      final detail = jsonDecode(resp.body)['detail'];
+      if (detail != null) return '$detail';
+    } catch (_) {}
+    return 'HTTP ${resp.statusCode}';
+  }
+
+  void _showMessage(
+    String text,
+    Color color, {
+    Duration duration = const Duration(seconds: 4),
+  }) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(duration: duration, backgroundColor: color, content: Text(text)),
+    );
+  }
+
+  /// Server times are UTC without a zone suffix; demo data already holds
+  /// display strings such as '10:52 AM', which are shown unchanged.
+  String _formatTime(dynamic value) {
+    if (value == null) return '-';
+    final raw = value.toString();
+    final hasZone =
+        raw.endsWith('Z') || RegExp(r'[+-]\d{2}:\d{2}$').hasMatch(raw);
+    final parsed = DateTime.tryParse(hasZone ? raw : '${raw}Z');
+    if (parsed == null) return raw;
+    return TimeOfDay.fromDateTime(parsed.toLocal()).format(context);
+  }
+
+  Future<void> _refreshGateData() async {
+    if (!_isOnline) return;
+    try {
+      final responses = await Future.wait([
+        http.get(
+          Uri.parse('$apiBase/api/security/active-visitors'),
+          headers: _authHeaders,
+        ),
+        http.get(
+          Uri.parse('$apiBase/api/security/recent-logs'),
+          headers: _authHeaders,
+        ),
+      ]).timeout(const Duration(seconds: 5));
+      final failed = responses.where((r) => r.statusCode != 200);
+      if (failed.isNotEmpty) {
+        _showMessage(
+          'Could not load gate records: ${_serverError(failed.first)}',
+          Colors.red.shade700,
+        );
+        return;
+      }
+      if (!mounted) return;
+      setState(() {
+        activeVisitors = List<Map<String, dynamic>>.from(
+          jsonDecode(responses[0].body) as List,
+        );
+        electronicGateLogs = List<Map<String, dynamic>>.from(
+          jsonDecode(responses[1].body) as List,
+        );
+      });
+    } catch (_) {
+      _showMessage(
+        'Could not reach the server at $apiBase to load gate records.',
+        Colors.red.shade700,
+      );
+    }
+  }
+
   Future<void> _loginOfficer() async {
     setState(() => isLoading = true);
+    String? serverProblem;
     try {
       final resp = await http
           .post(
@@ -107,14 +195,32 @@ class _SecurityGateHomeScreenState extends State<SecurityGateHomeScreen> {
         final data = jsonDecode(resp.body);
         jwtToken = data['access_token'];
         officerName = data['user']['full_name'];
+        // Drop the built-in demo records; the server's records load below.
+        activeVisitors = [];
+        electronicGateLogs = [];
+      } else {
+        serverProblem =
+            'The server at $apiBase refused the sign-in (HTTP ${resp.statusCode}).';
       }
     } catch (_) {
       // Uses local fallback credentials when offline
+      serverProblem = 'Could not reach the server at $apiBase.';
     }
+    if (!mounted) return;
     setState(() {
       isLoading = false;
       isAuthenticated = true;
     });
+    if (serverProblem != null) {
+      _showMessage(
+        '$serverProblem Offline demo mode: only the built-in demo codes will '
+        'verify, and nothing is saved to the server.',
+        Colors.orange.shade800,
+        duration: const Duration(seconds: 8),
+      );
+    } else {
+      await _refreshGateData();
+    }
   }
 
   Future<void> _verifyAccessCode(String rawCode) async {
@@ -122,32 +228,46 @@ class _SecurityGateHomeScreenState extends State<SecurityGateHomeScreen> {
     if (cleaned.isEmpty) return;
 
     setState(() => isLoading = true);
-    try {
-      final resp = await http
-          .post(
-            Uri.parse('$apiBase/api/security/verify'),
-            headers: {
-              'Content-Type': 'application/json',
-              if (jwtToken != null) 'Authorization': 'Bearer $jwtToken',
-            },
-            body: jsonEncode({
-              'code_or_qr': cleaned,
-              'gate_name': selectedGate,
-            }),
-          )
-          .timeout(const Duration(seconds: 3));
+    if (_isOnline) {
+      String problem;
+      try {
+        final resp = await http
+            .post(
+              Uri.parse('$apiBase/api/security/verify'),
+              headers: _authHeaders,
+              body: jsonEncode({
+                'code_or_qr': cleaned,
+                'gate_name': selectedGate,
+              }),
+            )
+            .timeout(const Duration(seconds: 5));
 
-      if (resp.statusCode == 200) {
-        setState(() {
-          verificationResult = jsonDecode(resp.body);
-          isLoading = false;
-        });
-        return;
+        if (resp.statusCode == 200) {
+          if (!mounted) return;
+          setState(() {
+            verificationResult = jsonDecode(resp.body);
+            isLoading = false;
+          });
+          // Rejected attempts are logged on the server; show them in the logbook.
+          _refreshGateData();
+          return;
+        }
+        problem = _serverError(resp);
+      } catch (_) {
+        problem = 'could not reach the server at $apiBase';
       }
-    } catch (_) {
-      // Offline / local demonstration verification rules
+      // Never fall back to demo rules while signed in: a demo "VALID" here
+      // would admit a visitor the server has not approved.
+      if (!mounted) return;
+      setState(() {
+        verificationResult = null;
+        isLoading = false;
+      });
+      _showMessage('Verification failed: $problem.', Colors.red.shade700);
+      return;
     }
 
+    // Offline demo mode: local demonstration verification rules.
     Map<String, dynamic> localResult;
     if (cleaned == '482910' || cleaned.contains('482910')) {
       localResult = {
@@ -233,11 +353,61 @@ class _SecurityGateHomeScreenState extends State<SecurityGateHomeScreen> {
     });
   }
 
-  void _admitVisitor() {
+  Future<void> _admitVisitor() async {
     if (verificationResult == null || verificationResult!['is_valid'] != true) {
       return;
     }
     final ac = verificationResult!['access_code'];
+
+    if (_isOnline) {
+      final plate = _plateInputCtrl.text.trim();
+      final notes = _notesInputCtrl.text.trim();
+      setState(() => isLoading = true);
+      try {
+        final resp = await http
+            .post(
+              Uri.parse('$apiBase/api/security/admit'),
+              headers: _authHeaders,
+              body: jsonEncode({
+                'code': ac['code'],
+                'gate_name': selectedGate,
+                'vehicle_plate': plate.isNotEmpty ? plate.toUpperCase() : null,
+                'notes': notes.isNotEmpty ? notes : null,
+              }),
+            )
+            .timeout(const Duration(seconds: 5));
+        if (!mounted) return;
+        if (resp.statusCode == 200) {
+          setState(() {
+            verificationResult = null;
+            _codeInputCtrl.clear();
+            _plateInputCtrl.clear();
+            _notesInputCtrl.clear();
+          });
+          _showMessage(
+            'Entry granted for ${ac['visitor_name']} and saved. '
+            'The resident has been notified.',
+            Colors.green.shade700,
+          );
+          await _refreshGateData();
+        } else {
+          _showMessage(
+            'Entry NOT recorded: ${_serverError(resp)}',
+            Colors.red.shade700,
+          );
+        }
+      } catch (_) {
+        _showMessage(
+          'Entry NOT recorded: could not reach the server at $apiBase. Try again.',
+          Colors.red.shade700,
+        );
+      } finally {
+        if (mounted) setState(() => isLoading = false);
+      }
+      return;
+    }
+
+    // Offline demo mode: update the on-screen lists only.
     final nowStr = TimeOfDay.now().format(context);
 
     final newEntry = {
@@ -269,14 +439,51 @@ class _SecurityGateHomeScreenState extends State<SecurityGateHomeScreen> {
       SnackBar(
         backgroundColor: Colors.green.shade700,
         content: Text(
-          'Entry Granted for ${ac['visitor_name']}. Resident notified & one-time code invalidated.',
+          'Entry granted for ${ac['visitor_name']} (offline demo, not saved to the server).',
         ),
       ),
     );
   }
 
-  void _recordExit(int index) {
+  Future<void> _recordExit(int index) async {
     final visitor = activeVisitors[index];
+
+    if (_isOnline) {
+      setState(() => isLoading = true);
+      try {
+        final resp = await http
+            .post(
+              Uri.parse('$apiBase/api/security/exit/${visitor['id']}'),
+              headers: _authHeaders,
+            )
+            .timeout(const Duration(seconds: 5));
+        if (!mounted) return;
+        if (resp.statusCode == 200) {
+          final saved = jsonDecode(resp.body);
+          _showMessage(
+            'Exit recorded for ${visitor['visitor_name']} at '
+            '${_formatTime(saved['exit_time'])}.',
+            Colors.blueGrey.shade700,
+          );
+          await _refreshGateData();
+        } else {
+          _showMessage(
+            'Exit NOT recorded: ${_serverError(resp)}',
+            Colors.red.shade700,
+          );
+        }
+      } catch (_) {
+        _showMessage(
+          'Exit NOT recorded: could not reach the server at $apiBase. Try again.',
+          Colors.red.shade700,
+        );
+      } finally {
+        if (mounted) setState(() => isLoading = false);
+      }
+      return;
+    }
+
+    // Offline demo mode: update the on-screen lists only.
     final nowStr = TimeOfDay.now().format(context);
     setState(() {
       activeVisitors.removeAt(index);
@@ -380,8 +587,11 @@ class _SecurityGateHomeScreenState extends State<SecurityGateHomeScreen> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                selectedGate,
-                style: const TextStyle(fontSize: 13, color: Colors.lightBlueAccent),
+                '$selectedGate • ${_isOnline ? 'Online' : 'Offline demo'}',
+                style: TextStyle(
+                  fontSize: 13,
+                  color: _isOnline ? Colors.lightBlueAccent : Colors.orange,
+                ),
               ),
               Text(
                 officerName,
@@ -389,6 +599,14 @@ class _SecurityGateHomeScreenState extends State<SecurityGateHomeScreen> {
               ),
             ],
           ),
+          actions: [
+            if (_isOnline)
+              IconButton(
+                tooltip: 'Refresh from server',
+                icon: const Icon(Icons.refresh),
+                onPressed: isLoading ? null : _refreshGateData,
+              ),
+          ],
           bottom: const TabBar(
             labelColor: Colors.white,
             unselectedLabelColor: Colors.white60,
@@ -541,7 +759,7 @@ class _SecurityGateHomeScreenState extends State<SecurityGateHomeScreen> {
                                   foregroundColor: Colors.white,
                                   padding: const EdgeInsets.symmetric(vertical: 14),
                                 ),
-                                onPressed: _admitVisitor,
+                                onPressed: isLoading ? null : _admitVisitor,
                                 child: const Text(
                                   'GRANT ENTRY & LOG ARRIVAL TIME',
                                   style: TextStyle(fontWeight: FontWeight.bold),
@@ -570,7 +788,7 @@ class _SecurityGateHomeScreenState extends State<SecurityGateHomeScreen> {
                       style: const TextStyle(fontWeight: FontWeight.bold),
                     ),
                     subtitle: Text(
-                      'Host: ${v['resident_name']} • ${v['unit_number']}\nEntered: ${v['entry_time']} • Plate: ${v['vehicle_plate']}',
+                      'Host: ${v['resident_name']} • ${v['unit_number']}\nEntered: ${_formatTime(v['entry_time'])} • Plate: ${v['vehicle_plate'] ?? 'N/A'}',
                     ),
                     isThreeLine: true,
                     trailing: ElevatedButton(
@@ -578,7 +796,7 @@ class _SecurityGateHomeScreenState extends State<SecurityGateHomeScreen> {
                         backgroundColor: Colors.orange.shade800,
                         foregroundColor: Colors.white,
                       ),
-                      onPressed: () => _recordExit(idx),
+                      onPressed: isLoading ? null : () => _recordExit(idx),
                       child: const Text('Log Exit'),
                     ),
                   ),
@@ -601,12 +819,12 @@ class _SecurityGateHomeScreenState extends State<SecurityGateHomeScreen> {
                       color: isRejected ? Colors.red : Colors.green,
                     ),
                     title: Text(
-                      '${log['visitor_name']} • Code: ${log['code_entered']}',
+                      '${log['visitor_name'] ?? 'Unknown visitor'} • Code: ${log['code_entered']}',
                       style: const TextStyle(fontWeight: FontWeight.bold),
                     ),
                     subtitle: Text(
-                      'Host: ${log['resident_name']} (${log['unit_number']})\n'
-                      'Status: ${log['action']} ${log['exit_time'] != null ? "• Exited: ${log['exit_time']}" : ""}'
+                      'Host: ${log['resident_name'] ?? '-'} (${log['unit_number'] ?? '-'})\n'
+                      'Status: ${log['action']} ${log['exit_time'] != null ? "• Exited: ${_formatTime(log['exit_time'])}" : ""}'
                       '${log['rejection_reason'] != null ? "\nReason: ${log['rejection_reason']}" : ""}',
                     ),
                   ),

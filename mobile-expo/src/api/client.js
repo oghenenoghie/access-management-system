@@ -1,4 +1,9 @@
-const DEFAULT_API_URL = "http://10.0.2.2:8000"; // Android Emulator localhost -> FastAPI
+// Set EXPO_PUBLIC_API_URL (e.g. in mobile-expo/.env) to http://<PC LAN IP>:8000
+// to test on a real phone. The default 10.0.2.2 only reaches the PC from the
+// Android emulator.
+const DEFAULT_API_URL = (
+  process.env.EXPO_PUBLIC_API_URL || "http://10.0.2.2:8000"
+).replace(/\/+$/, "");
 
 export class EstateApiClient {
   constructor(baseUrl = DEFAULT_API_URL) {
