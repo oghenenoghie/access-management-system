@@ -90,6 +90,7 @@ npm run dev
 Open `http://localhost:3000`.
 
 ### 4. Run the React Native (Expo) Resident Mobile App
+Uses Expo SDK 57, so it opens in the current Expo Go from the Play Store.
 ```bash
 cd mobile-expo
 npm install
@@ -99,7 +100,6 @@ npx expo start --android
 ### 5. Run the Flutter Android Security Gate App
 ```bash
 cd mobile-flutter
-flutter create --platforms=android --org com.royalpalms --project-name estate_gate_access_flutter .   # once only
 flutter pub get
 flutter run
 ```
