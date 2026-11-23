@@ -87,7 +87,7 @@ cd admin-dashboard
 npm install
 npm run dev
 ```
-Open `http://localhost:3000`.
+Open `http://localhost:3000` and sign in with the Estate Administrator account from the table above (other roles are turned away). Every section reads from and writes to the backend, so start the backend first. If it isn't on `http://localhost:8000`, put `NEXT_PUBLIC_API_URL=http://<host>:8000` in `admin-dashboard/.env.local`.
 
 ### 4. Run the React Native (Expo) Resident Mobile App
 Uses Expo SDK 57, so it opens in the current Expo Go from the Play Store.

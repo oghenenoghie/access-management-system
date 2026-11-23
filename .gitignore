@@ -13,6 +13,8 @@ env/
 
 # Node / Next.js / Expo
 node_modules/
+*.tsbuildinfo
+next-env.d.ts
 .next/
 out/
 .expo/
