@@ -5,6 +5,20 @@ const DEFAULT_API_URL = (
   process.env.EXPO_PUBLIC_API_URL || "http://10.0.2.2:8000"
 ).replace(/\/+$/, "");
 
+// FastAPI sends validation failures (HTTP 422) as a list of
+// { loc: ["body", "valid_hours"], msg: "..." }; turn that into readable text.
+function describeError(detail, status) {
+  if (Array.isArray(detail)) {
+    return detail
+      .map((d) => {
+        const field = Array.isArray(d.loc) ? d.loc[d.loc.length - 1] : "";
+        return field ? `${String(field).replace(/_/g, " ")}: ${d.msg}` : d.msg;
+      })
+      .join("\n");
+  }
+  return detail ? String(detail) : `Request failed (HTTP ${status}).`;
+}
+
 export class EstateApiClient {
   constructor(baseUrl = DEFAULT_API_URL) {
     this.baseUrl = baseUrl;
@@ -22,14 +36,19 @@ export class EstateApiClient {
       ...(options.headers || {}),
     };
 
-    const response = await fetch(`${this.baseUrl}${path}`, {
-      ...options,
-      headers,
-    });
+    let response;
+    try {
+      response = await fetch(`${this.baseUrl}${path}`, {
+        ...options,
+        headers,
+      });
+    } catch {
+      throw new Error(`Could not reach the server at ${this.baseUrl}.`);
+    }
 
-    const data = await response.json();
+    const data = await response.json().catch(() => ({}));
     if (!response.ok) {
-      throw new Error(data.detail || "Request failed");
+      throw new Error(describeError(data.detail, response.status));
     }
     return data;
   }

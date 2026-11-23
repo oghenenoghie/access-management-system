@@ -125,6 +125,7 @@ export default function App() {
       refreshResidentData();
     } catch (err) {
       // Fallback to seeded demo resident if backend server is offline
+      apiClient.setToken(null);
       Alert.alert(
         "Offline demo mode",
         `Sign-in through ${apiClient.baseUrl} failed (${err.message}). ` +
@@ -200,7 +201,14 @@ export default function App() {
       const created = await apiClient.createAccessCode(payload);
       setAccessCodes([created, ...accessCodes]);
       setGeneratedPassModal(created);
-    } catch {
+    } catch (err) {
+      if (apiClient.token) {
+        // Signed in through the server: never invent a code the gate can't verify.
+        // Keep the form filled in so the resident can correct it and retry.
+        Alert.alert("Pass not created", err.message);
+        return;
+      }
+      // Offline demo mode only: make a local pass that exists on this phone alone.
       const randomCode = String(Math.floor(100000 + Math.random() * 900000));
       const fallbackCode = {
         id: Date.now(),
@@ -253,8 +261,13 @@ export default function App() {
   const handleCancelCode = async (codeObj) => {
     try {
       await apiClient.cancelAccessCode(codeObj.id);
-    } catch {
-      // Offline update
+    } catch (err) {
+      if (apiClient.token) {
+        // Signed in through the server: the code is still valid at the gate.
+        Alert.alert("Code NOT cancelled", err.message);
+        return;
+      }
+      // Offline demo mode: update this phone's list only.
     }
     setAccessCodes((prev) =>
       prev.map((item) => (item.id === codeObj.id ? { ...item, status: "cancelled" } : item))
@@ -374,7 +387,13 @@ export default function App() {
           <Text style={styles.headerSubtitle}>{user?.unit?.unit_number || "Block A - Apt 101"}</Text>
           <Text style={styles.headerTitle}>{user?.full_name}</Text>
         </View>
-        <TouchableOpacity style={styles.logoutBtn} onPress={() => setAuthView("login")}>
+        <TouchableOpacity
+          style={styles.logoutBtn}
+          onPress={() => {
+            apiClient.setToken(null);
+            setAuthView("login");
+          }}
+        >
           <Text style={styles.logoutText}>Sign Out</Text>
         </TouchableOpacity>
       </View>
