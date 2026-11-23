@@ -11,9 +11,10 @@ same one-time code was then rejected as already used.
 | Resident app (`mobile-expo/`) | Phone | Expo Go from the Play Store |
 | Gate security app (`mobile-flutter/`) | Phone | `flutter run` over USB |
 
-One phone is enough for both apps. The gate app's "Simulate QR Scan" button
-doesn't use the camera, so you type the resident's 6-digit code into the gate
-app instead.
+One phone is enough for both apps. The gate app can scan pass QR codes with
+the camera, but a phone can't scan its own screen, so with one phone either
+type the 6-digit code or show the pass QR on another screen (see
+[Scanning a QR pass](#scanning-a-qr-pass)).
 
 ---
 
@@ -179,6 +180,26 @@ Phones with little free memory may close the app you're not looking at. If
 the gate app reopens on its sign-in screen, sign in again and check it says
 **Online**.
 
+### Scanning a QR pass
+
+In the gate app, **Scan QR Pass** opens the camera. The first time, Android
+asks for camera access; choose **While using the app**. When it reads a pass
+QR, the camera closes, the 6-digit code appears in the box, and the result
+shows as if you had tapped **Verify Code**. The whole QR text is sent to the
+server, which accepts either a bare code or a pass QR.
+
+The resident app doesn't draw the QR image yet; its pass banner shows the QR
+text (`[ QR PAYLOAD: ESTATE-PASS|CODE:…|UNIT:…|SIG:… ]`). To test scanning,
+turn that text into an image on the PC and point the phone at the screen:
+
+```powershell
+cd backend
+.venv\Scripts\python -c "import qrcode; qrcode.make('ESTATE-PASS|CODE:123456|UNIT:1|SIG:ABC123').save('pass-qr.png')"
+start pass-qr.png
+```
+
+Replace the text in quotes with the payload from the resident app.
+
 ## Troubleshooting
 
 - **`adb devices` lists nothing.** The phone isn't offering a debugging
@@ -196,10 +217,7 @@ the gate app reopens on its sign-in screen, sign in again and check it says
 
 ## Known gaps
 
-- **The QR scan is simulated.** The scan button always verifies `482910`, and
-  the `mobile_scanner` package is installed but unused. Flutter also warns
-  that a future version will refuse `mobile_scanner` unless it is updated.
-- **`SafeAreaView` is deprecated** in React Native 0.86. The resident app still
-  works, but logs a warning; `react-native-safe-area-context` replaces it.
+- **The resident app doesn't draw pass QR codes.** It shows the QR text
+  instead; `react-native-qrcode-svg` is already a dependency for drawing it.
 - **The Flutter app ID** is `com.royalpalms.estate_gate_access_flutter`. To
   change it, edit `applicationId` in `android/app/build.gradle.kts`.

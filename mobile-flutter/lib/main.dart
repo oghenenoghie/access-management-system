@@ -2,6 +2,8 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 
+import 'qr_scan_page.dart';
+
 void main() {
   runApp(const EstateGateSecurityApp());
 }
@@ -223,6 +225,25 @@ class _SecurityGateHomeScreenState extends State<SecurityGateHomeScreen> {
     }
   }
 
+  /// Opens the camera scanner and verifies whatever QR code it reads.
+  ///
+  /// The full QR text is sent to the server, which accepts either a bare code
+  /// or a pass payload; the input box shows just the 6-digit code.
+  Future<void> _scanQrPass() async {
+    final scanned = await Navigator.of(context).push<String>(
+      MaterialPageRoute(builder: (_) => const QrScanPage()),
+    );
+    if (!mounted || scanned == null) return;
+    _codeInputCtrl.text = _codeFromQr(scanned);
+    await _verifyAccessCode(scanned);
+  }
+
+  /// Pass QR codes look like `ESTATE-PASS|CODE:123456|UNIT:1|SIG:...`.
+  String _codeFromQr(String raw) {
+    final match = RegExp(r'CODE:\s*([0-9A-Za-z]+)').firstMatch(raw);
+    return match?.group(1) ?? raw;
+  }
+
   Future<void> _verifyAccessCode(String rawCode) async {
     final cleaned = rawCode.trim();
     if (cleaned.isEmpty) return;
@@ -268,8 +289,10 @@ class _SecurityGateHomeScreenState extends State<SecurityGateHomeScreen> {
     }
 
     // Offline demo mode: local demonstration verification rules.
+    // Compare the bare code, so scanned pass payloads match too.
+    final code = _codeFromQr(cleaned);
     Map<String, dynamic> localResult;
-    if (cleaned == '482910' || cleaned.contains('482910')) {
+    if (code == '482910') {
       localResult = {
         'is_valid': true,
         'verification_status': 'VALID',
@@ -289,7 +312,7 @@ class _SecurityGateHomeScreenState extends State<SecurityGateHomeScreen> {
           'max_uses': 1,
         }
       };
-    } else if (cleaned == '739104' || cleaned.contains('739104')) {
+    } else if (code == '739104') {
       localResult = {
         'is_valid': true,
         'verification_status': 'VALID',
@@ -309,7 +332,7 @@ class _SecurityGateHomeScreenState extends State<SecurityGateHomeScreen> {
           'max_uses': 4,
         }
       };
-    } else if (cleaned == '510293') {
+    } else if (code == '510293') {
       localResult = {
         'is_valid': false,
         'verification_status': 'ALREADY_USED',
@@ -324,7 +347,7 @@ class _SecurityGateHomeScreenState extends State<SecurityGateHomeScreen> {
           'code_type': 'one_time',
         }
       };
-    } else if (cleaned == '194822') {
+    } else if (code == '194822') {
       localResult = {
         'is_valid': false,
         'verification_status': 'EXPIRED',
@@ -343,7 +366,7 @@ class _SecurityGateHomeScreenState extends State<SecurityGateHomeScreen> {
         'is_valid': false,
         'verification_status': 'INVALID',
         'message':
-            'REJECTED: Code "$cleaned" does not exist in the Estate Database.',
+            'REJECTED: Code "$code" does not exist in the Estate Database.',
       };
     }
 
@@ -679,12 +702,9 @@ class _SecurityGateHomeScreenState extends State<SecurityGateHomeScreen> {
                                   style: OutlinedButton.styleFrom(
                                     padding: const EdgeInsets.symmetric(vertical: 14),
                                   ),
-                                  onPressed: () {
-                                    _codeInputCtrl.text = '482910';
-                                    _verifyAccessCode('482910');
-                                  },
+                                  onPressed: isLoading ? null : _scanQrPass,
                                   icon: const Icon(Icons.qr_code_scanner),
-                                  label: const Text('Simulate QR Scan'),
+                                  label: const Text('Scan QR Pass'),
                                 ),
                               ),
                             ],
