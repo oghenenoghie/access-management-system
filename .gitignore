@@ -10,6 +10,7 @@ env/
 *.db
 *.sqlite3
 .env
+.jwt_secret
 
 # Node / Next.js / Expo
 node_modules/

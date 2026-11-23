@@ -13,7 +13,7 @@ class ResidentRegisterRequest(BaseModel):
     full_name: str
     email: EmailStr
     phone: str
-    password: str
+    password: str = Field(..., min_length=8, max_length=128, description="At least 8 characters")
     estate_id_number: str = Field(..., description="Estate-approved identification number")
     unit_number: str = Field(..., description="Residential unit or apartment number")
 
@@ -25,7 +25,7 @@ class PasswordRecoveryRequest(BaseModel):
 class PasswordResetConfirm(BaseModel):
     email: EmailStr
     recovery_code: str
-    new_password: str
+    new_password: str = Field(..., min_length=8, max_length=128, description="At least 8 characters")
 
 
 class ProfileUpdateRequest(BaseModel):
@@ -179,7 +179,7 @@ class AdminUserCreate(BaseModel):
     full_name: str
     email: EmailStr
     phone: str
-    password: str
+    password: str = Field(..., min_length=8, max_length=128, description="At least 8 characters")
     role: str = "resident"  # resident | security | admin
     status: str = "active"
     estate_id_number: Optional[str] = None

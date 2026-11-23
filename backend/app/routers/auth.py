@@ -1,6 +1,8 @@
-import random
-from datetime import datetime
-from fastapi import APIRouter, Depends, HTTPException, status
+import hmac
+import logging
+import secrets
+from datetime import datetime, timedelta
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session
 from sqlalchemy import or_
 
@@ -18,15 +20,36 @@ from ..schemas import (
 from ..auth import (
     hash_password,
     verify_password,
+    password_needs_rehash,
+    dummy_password_hash,
+    login_failures_by_account,
+    login_failures_by_address,
+    recovery_requests_by_email,
     create_access_token,
     get_current_user,
+    IS_PRODUCTION,
 )
+
+logger = logging.getLogger("estate.auth")
 
 router = APIRouter(prefix="/api/auth", tags=["Authentication & Profile"])
 
+RECOVERY_CODE_TTL = timedelta(minutes=15)
+RECOVERY_MAX_ATTEMPTS = 5
+
 
 @router.post("/login", response_model=TokenResponse)
-def login(payload: LoginRequest, db: Session = Depends(get_db)):
+def login(payload: LoginRequest, request: Request, db: Session = Depends(get_db)):
+    account_key = payload.identifier.lower().strip()
+    address_key = request.client.host if request.client else "unknown"
+    wait = max(login_failures_by_account.retry_after(account_key), login_failures_by_address.retry_after(address_key))
+    if wait:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=f"Too many failed sign-in attempts. Try again in {max(1, wait // 60)} minute(s).",
+            headers={"Retry-After": str(wait)},
+        )
+
     user = (
         db.query(User)
         .filter(
@@ -37,11 +60,20 @@ def login(payload: LoginRequest, db: Session = Depends(get_db)):
         )
         .first()
     )
-    if not user or not verify_password(payload.password, user.password_hash):
+    # Check a dummy hash for unknown accounts so timing doesn't reveal which exist.
+    password_ok = verify_password(payload.password, user.password_hash if user else dummy_password_hash())
+    if not user or not password_ok:
+        login_failures_by_account.record_failure(account_key)
+        login_failures_by_address.record_failure(address_key)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid email/phone or password",
         )
+    login_failures_by_account.reset(account_key)
+
+    # Upgrade old fixed-salt (or weaker) hashes now that we have the password.
+    if password_needs_rehash(user.password_hash):
+        user.password_hash = hash_password(payload.password)
     if user.status == "pending":
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -104,7 +136,10 @@ def register_resident(payload: ResidentRegisterRequest, db: Session = Depends(ge
         phone=payload.phone.strip(),
         password_hash=hash_password(payload.password),
         role="resident",
-        status="active",  # Or 'pending' if manual admin approval is enforced; active for immediate onboarding with valid EST- ID
+        # Anyone can call this endpoint, and an "EST-" prefix proves nothing, so a
+        # new resident can't sign in or issue gate passes until Estate
+        # Management approves the account in the admin dashboard.
+        status="pending",
         estate_id_number=payload.estate_id_number.upper().strip(),
         unit_id=unit.id,
     )
@@ -115,7 +150,10 @@ def register_resident(payload: ResidentRegisterRequest, db: Session = Depends(ge
         Notification(
             user_id=new_user.id,
             title="Welcome to Estate Gate Access",
-            message=f"Your resident account for {unit.unit_number} has been verified with Estate ID {new_user.estate_id_number}.",
+            message=(
+                f"Your resident account for {unit.unit_number} (Estate ID {new_user.estate_id_number}) "
+                "is waiting for approval by Estate Management."
+            ),
             event_type="account_update",
         )
     )
@@ -135,30 +173,83 @@ def register_resident(payload: ResidentRegisterRequest, db: Session = Depends(ge
     return new_user
 
 
+def _deliver_recovery_code(user: User, code: str) -> None:
+    # No email/SMS provider is configured yet. Never send the code in the API
+    # response: anyone could then reset anyone's password.
+    if IS_PRODUCTION:
+        logger.warning(
+            "Password recovery requested for user %s, but no email/SMS delivery is configured.", user.id
+        )
+    else:
+        logger.warning(
+            "DEVELOPMENT ONLY - password recovery code for %s: %s (valid %d minutes)",
+            user.email,
+            code,
+            int(RECOVERY_CODE_TTL.total_seconds() // 60),
+        )
+
+
 @router.post("/password-recovery")
 def request_password_recovery(payload: PasswordRecoveryRequest, db: Session = Depends(get_db)):
-    user = db.query(User).filter(User.email == payload.email.lower().strip()).first()
-    if not user:
-        return {"message": "If the email exists, a 6-digit recovery code has been sent."}
+    # Same reply whether or not the email is registered, so this can't be used
+    # to find out who has an account.
+    reply = {"message": "If that email is registered, a 6-digit recovery code has been sent to it."}
+    email = payload.email.lower().strip()
+    if recovery_requests_by_email.retry_after(email):
+        return reply
+    recovery_requests_by_email.record_failure(email)
 
-    code = f"{random.randint(100000, 999999)}"
+    user = db.query(User).filter(User.email == email).first()
+    if not user or user.status == "deactivated":
+        return reply
+
+    code = f"{secrets.randbelow(900000) + 100000}"
     user.recovery_code = code
+    user.recovery_expires_at = datetime.utcnow() + RECOVERY_CODE_TTL
+    user.recovery_attempts = 0
     db.commit()
-    return {
-        "message": "Recovery code generated and dispatched to your registered email/SMS.",
-        "demo_recovery_code": code,
-    }
+    _deliver_recovery_code(user, code)
+    return reply
 
 
 @router.post("/password-reset")
 def confirm_password_reset(payload: PasswordResetConfirm, db: Session = Depends(get_db)):
+    invalid = HTTPException(status_code=400, detail="Invalid or expired recovery code.")
     user = db.query(User).filter(User.email == payload.email.lower().strip()).first()
-    if not user or not user.recovery_code or user.recovery_code != payload.recovery_code.strip():
-        raise HTTPException(status_code=400, detail="Invalid or expired recovery code.")
+    if (
+        not user
+        or not user.recovery_code
+        or not user.recovery_expires_at
+        or user.recovery_expires_at < datetime.utcnow()
+    ):
+        raise invalid
+
+    if not hmac.compare_digest(user.recovery_code, payload.recovery_code.strip()):
+        user.recovery_attempts = (user.recovery_attempts or 0) + 1
+        if user.recovery_attempts >= RECOVERY_MAX_ATTEMPTS:
+            # Too many guesses: the code is no longer usable; request a new one.
+            user.recovery_code = None
+            user.recovery_expires_at = None
+        db.commit()
+        raise invalid
 
     user.password_hash = hash_password(payload.new_password)
     user.recovery_code = None
+    user.recovery_expires_at = None
+    user.recovery_attempts = 0
+    db.add(
+        AuditLog(
+            actor_id=user.id,
+            actor_name=user.full_name,
+            actor_role=user.role,
+            action="PASSWORD_RESET",
+            target_type="User",
+            target_id=str(user.id),
+            details="Password reset with a recovery code",
+        )
+    )
     db.commit()
+    login_failures_by_account.reset(user.email)
     return {"message": "Password has been reset successfully. You may now log in."}
 
 

@@ -42,6 +42,8 @@ class User(Base):
     unit_id = Column(Integer, ForeignKey("units.id"), nullable=True)
     push_token = Column(String(255), nullable=True)
     recovery_code = Column(String(20), nullable=True)
+    recovery_expires_at = Column(DateTime, nullable=True)
+    recovery_attempts = Column(Integer, nullable=False, default=0)
     created_at = Column(DateTime, default=datetime.utcnow)
     last_login = Column(DateTime, nullable=True)
 

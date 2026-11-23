@@ -66,6 +66,29 @@ estate-gate-access/
 - `510293`: **Already-Used One-Time Code** (Automatically rejected if presented again)
 - `194822`: **Expired Access Code** (Automatically rejected & alerts resident)
 
+These accounts and passwords are public. They're for local testing only: never run a real estate on the seeded data.
+
+---
+
+## Configuration & Security
+
+The backend reads these environment variables:
+
+| Variable | Default | What it does |
+| :--- | :--- | :--- |
+| `APP_ENV` | `development` | Set to `production` on a real server. The backend then refuses to start without a safe `JWT_SECRET_KEY`. |
+| `JWT_SECRET_KEY` | *(generated)* | Signs sign-in tokens. In production, set a long random value, e.g. from `python -c "import secrets; print(secrets.token_urlsafe(48))"`, and keep it out of git. In development, if it's unset, the backend creates a private key in `backend/.jwt_secret` (git-ignored). |
+| `CORS_ALLOWED_ORIGINS` | `http://localhost:3000,http://127.0.0.1:3000` | Comma-separated web origins allowed to call the API (the admin dashboard). Add the dashboard's real address when you host it. The mobile apps aren't affected. |
+| `PASSWORD_HASH_ITERATIONS` | `310000` | PBKDF2-SHA256 rounds for new password hashes. Raise it on a fast server. Older hashes are upgraded at the next sign-in. |
+| `DATABASE_URL` | `sqlite:///./estate_access.db` | Database location. |
+
+How sign-in is protected:
+- **Passwords** are hashed with a random salt per password, and new passwords must be 8–128 characters.
+- **Repeated wrong passwords** lock an account for 15 minutes after 5 tries, or an address after 30. The lock is kept in memory, so it resets when the server restarts.
+- **New resident registrations** start as *pending* and can't sign in or issue passes until an administrator approves them in the admin dashboard.
+- **Suspending or deactivating** a person cuts off their existing sessions immediately.
+- **Password recovery codes** are random, expire after 15 minutes, and stop working after 5 wrong tries. The API never returns the code. No email/SMS sender is connected yet: in development, the code is printed in the backend's log; in production, nothing is sent until a sender is added.
+
 ---
 
 ## Quick Start Instructions
