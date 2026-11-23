@@ -1,0 +1,61 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  backend:
+    name: Backend tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          # SQLAlchemy 2.0.35 (pinned) has no wheels for newer Pythons.
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements*.txt
+      - run: pip install -r requirements.txt -r requirements-dev.txt
+      - run: pytest
+
+  admin-dashboard:
+    name: Admin dashboard type check
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: admin-dashboard
+    env:
+      NEXT_TELEMETRY_DISABLED: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: admin-dashboard/package-lock.json
+      - run: npm ci
+      - run: npx tsc --noEmit
+
+  gate-app:
+    name: Gate app analysis
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: mobile-flutter
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - run: flutter --disable-analytics
+      - run: flutter pub get
+      # Info-level hints (such as deprecations) are reported but don't fail the build.
+      - run: flutter analyze --no-fatal-infos

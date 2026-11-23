@@ -104,6 +104,14 @@ uvicorn app.main:app --reload --port 8000
 ```
 Interactive Swagger API documentation is available at `http://localhost:8000/docs`.
 
+**Run the backend tests** (Python 3.12):
+```bash
+cd backend
+pip install -r requirements.txt -r requirements-dev.txt
+pytest
+```
+Each test runs against a fresh copy of the demo data in a temporary database, so your `estate_access.db` isn't touched. The tests cover sign-in and lockout, passwords and recovery, registration approval, the gate flow (verify, admit, exit, already-used, expired, cancelled, QR payloads), resident passes, and the admin actions. GitHub Actions runs them on every push and pull request (`.github/workflows/ci.yml`), along with the admin dashboard's type check and the gate app's `flutter analyze`.
+
 ### 3. Run the Next.js Estate Management Admin Dashboard
 ```bash
 cd admin-dashboard
