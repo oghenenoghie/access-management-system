@@ -44,7 +44,7 @@ jobs:
       - run: npx tsc --noEmit
 
   gate-app:
-    name: Gate app analysis
+    name: Gate app analysis and tests
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -59,3 +59,6 @@ jobs:
       - run: flutter pub get
       # Info-level hints (such as deprecations) are reported but don't fail the build.
       - run: flutter analyze --no-fatal-infos
+      # Widget tests in both demo modes (debug default, and as in release builds).
+      - run: flutter test
+      - run: flutter test --dart-define=DEMO_MODE=false

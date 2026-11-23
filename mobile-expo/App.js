@@ -5,6 +5,7 @@ import {
   TextInput,
   TouchableOpacity,
   ScrollView,
+  RefreshControl,
   StyleSheet,
   Share,
   Linking,
@@ -14,6 +15,17 @@ import {
 import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
 import QRCode from "react-native-qrcode-svg";
 import { apiClient } from "./src/api/client";
+
+// Demo mode pre-fills the demo resident's sign-in, shows sample passes and
+// alerts, and falls back to built-in data when the server can't be reached.
+// On in development (Expo Go), off in release builds; override with
+// EXPO_PUBLIC_DEMO_MODE=true|false.
+const DEMO_MODE = process.env.EXPO_PUBLIC_DEMO_MODE
+  ? process.env.EXPO_PUBLIC_DEMO_MODE === "true"
+  : __DEV__;
+
+// How often to refresh passes, history and alerts while the app is open.
+const REFRESH_INTERVAL_MS = 30000;
 
 // The pass QR the visitor shows at the gate. Dark-on-white with a quiet zone,
 // so the gate app's camera can read it even on a dark card.
@@ -37,14 +49,18 @@ export default function App() {
 }
 
 function ResidentApp() {
-  // Auth state: "login" | "register" | "recovery" | "authenticated"
+  // Auth state: "login" | "register" | "recovery" | "reset" | "authenticated"
   const [authView, setAuthView] = useState("login");
   const [user, setUser] = useState(null);
   const [activeTab, setActiveTab] = useState("generate"); // generate | codes | history | notifications | profile
+  const [refreshing, setRefreshing] = useState(false);
 
   // Login / Register inputs
-  const [identifier, setIdentifier] = useState("adewale.banjo@example.com");
-  const [password, setPassword] = useState("Resident@123");
+  const [identifier, setIdentifier] = useState(DEMO_MODE ? "adewale.banjo@example.com" : "");
+  const [password, setPassword] = useState(DEMO_MODE ? "Resident@123" : "");
+  const [resetCode, setResetCode] = useState("");
+  const [resetPassword, setResetPassword] = useState("");
+  const [resetPasswordConfirm, setResetPasswordConfirm] = useState("");
   const [regName, setRegName] = useState("");
   const [regEmail, setRegEmail] = useState("");
   const [regPhone, setRegPhone] = useState("");
@@ -64,7 +80,7 @@ function ResidentApp() {
   const [maxUses, setMaxUses] = useState("1");
 
   // Resident data lists
-  const [accessCodes, setAccessCodes] = useState([
+  const [accessCodes, setAccessCodes] = useState(DEMO_MODE ? [
     {
       id: 101,
       code: "482910",
@@ -95,9 +111,9 @@ function ResidentApp() {
       use_count: 1,
       status: "used",
     },
-  ]);
+  ] : []);
 
-  const [historyLogs, setHistoryLogs] = useState([
+  const [historyLogs, setHistoryLogs] = useState(DEMO_MODE ? [
     {
       id: 1,
       code_entered: "510293",
@@ -116,9 +132,9 @@ function ResidentApp() {
       gate_name: "South Service Gate",
       entry_time: "2026-11-15 08:15",
     },
-  ]);
+  ] : []);
 
-  const [notifications, setNotifications] = useState([
+  const [notifications, setNotifications] = useState(DEMO_MODE ? [
     {
       id: 1,
       title: "Visitor Admitted at Gate",
@@ -135,7 +151,7 @@ function ResidentApp() {
       created_at: "Today, 08:15 AM",
       is_read: false,
     },
-  ]);
+  ] : []);
 
   const [generatedPassModal, setGeneratedPassModal] = useState(null);
   const [qrShownForId, setQrShownForId] = useState(null);
@@ -155,7 +171,11 @@ function ResidentApp() {
         Alert.alert("Sign-in failed", err.message);
         return;
       }
-      // Fallback to seeded demo resident only when the server can't be reached
+      if (!DEMO_MODE) {
+        Alert.alert("Can't reach the server", `${err.message} Check your internet connection and try again.`);
+        return;
+      }
+      // Demo builds only: fall back to the seeded demo resident
       Alert.alert(
         "Offline demo mode",
         `Sign-in through ${apiClient.baseUrl} failed (${err.message}). ` +
@@ -203,7 +223,67 @@ function ResidentApp() {
     }
   };
 
+  const handleRequestRecovery = async () => {
+    const email = recoveryEmail.trim();
+    if (!email) {
+      Alert.alert("Enter your email", "Type the email address you registered with.");
+      return;
+    }
+    try {
+      const res = await apiClient.requestPasswordRecovery(email);
+      // The server gives the same answer whether or not the email is registered.
+      Alert.alert("Check your email", res.message);
+      setResetCode("");
+      setAuthView("reset");
+    } catch (err) {
+      Alert.alert("Couldn't request a code", err.message);
+    }
+  };
+
+  const handleResetPassword = async () => {
+    const email = recoveryEmail.trim();
+    if (!email || resetCode.trim().length !== 6) {
+      Alert.alert("Missing details", "Enter your email and the 6-digit code you received.");
+      return;
+    }
+    if (resetPassword.length < 8) {
+      Alert.alert("Choose a password", "Your new password must be at least 8 characters.");
+      return;
+    }
+    if (resetPassword !== resetPasswordConfirm) {
+      Alert.alert("Passwords don't match", "Type the same new password in both boxes.");
+      return;
+    }
+    try {
+      await apiClient.resetPassword(email, resetCode.trim(), resetPassword);
+      Alert.alert("Password changed", "You can now sign in with your new password.");
+      setIdentifier(email);
+      setPassword("");
+      setResetCode("");
+      setResetPassword("");
+      setResetPasswordConfirm("");
+      setAuthView("login");
+    } catch (err) {
+      Alert.alert("Couldn't reset the password", err.message);
+    }
+  };
+
+  // Clears everything from the previous session so the next person signing
+  // in on this phone never sees it.
+  const signOut = (message) => {
+    apiClient.setToken(null);
+    setUser(null);
+    setAccessCodes([]);
+    setHistoryLogs([]);
+    setNotifications([]);
+    setGeneratedPassModal(null);
+    setQrShownForId(null);
+    setAuthView("login");
+    if (message) Alert.alert("Signed out", message);
+  };
+
   const refreshResidentData = async () => {
+    if (!apiClient.token) return; // offline demo: keep the local lists
     try {
       const [codes, hist, notifs] = await Promise.all([
         apiClient.listAccessCodes(),
@@ -213,9 +293,29 @@ function ResidentApp() {
       setAccessCodes(codes);
       setHistoryLogs(hist);
       setNotifications(notifs);
-    } catch {
-      // Uses local state when offline
+    } catch (err) {
+      if (err.status === 401) {
+        signOut("Your session has ended. Please sign in again.");
+      } else if (err.status === 403) {
+        signOut(err.message); // e.g. the account was suspended
+      }
+      // Network blips: keep showing the last data; the next refresh retries.
     }
+  };
+
+  // Keep passes, visitor history and alerts current while signed in.
+  useEffect(() => {
+    if (authView !== "authenticated" || !apiClient.token) return undefined;
+    const timer = setInterval(() => {
+      refreshResidentData();
+    }, REFRESH_INTERVAL_MS);
+    return () => clearInterval(timer);
+  }, [authView]);
+
+  const onPullToRefresh = async () => {
+    setRefreshing(true);
+    await refreshResidentData();
+    setRefreshing(false);
   };
 
   const handleGenerateCode = async () => {
@@ -406,14 +506,60 @@ function ResidentApp() {
                 placeholder="resident@example.com"
                 autoCapitalize="none"
               />
-              <TouchableOpacity
-                style={styles.primaryBtn}
-                onPress={() => {
-                  Alert.alert("Recovery Code Sent", "A 6-digit recovery pin has been sent to your email and SMS.");
-                  setAuthView("login");
-                }}
-              >
+              <TouchableOpacity style={styles.primaryBtn} onPress={handleRequestRecovery}>
                 <Text style={styles.primaryBtnText}>Send Recovery Code</Text>
+              </TouchableOpacity>
+              <TouchableOpacity onPress={() => setAuthView("reset")} style={{ marginTop: 12 }}>
+                <Text style={styles.linkText}>I already have a code</Text>
+              </TouchableOpacity>
+              <TouchableOpacity onPress={() => setAuthView("login")} style={{ marginTop: 12 }}>
+                <Text style={styles.linkText}>Back to Login</Text>
+              </TouchableOpacity>
+            </>
+          )}
+
+          {authView === "reset" && (
+            <>
+              <Text style={styles.inputLabel}>Registered Email Address</Text>
+              <TextInput
+                style={styles.input}
+                value={recoveryEmail}
+                onChangeText={setRecoveryEmail}
+                placeholder="resident@example.com"
+                autoCapitalize="none"
+                keyboardType="email-address"
+              />
+              <Text style={styles.inputLabel}>6-Digit Recovery Code</Text>
+              <TextInput
+                style={styles.input}
+                value={resetCode}
+                onChangeText={setResetCode}
+                keyboardType="number-pad"
+                maxLength={6}
+              />
+              <Text style={styles.inputLabel}>New Password (at least 8 characters)</Text>
+              <TextInput
+                style={styles.input}
+                value={resetPassword}
+                onChangeText={setResetPassword}
+                secureTextEntry
+                autoCapitalize="none"
+                autoComplete="password-new"
+              />
+              <Text style={styles.inputLabel}>Repeat New Password</Text>
+              <TextInput
+                style={styles.input}
+                value={resetPasswordConfirm}
+                onChangeText={setResetPasswordConfirm}
+                secureTextEntry
+                autoCapitalize="none"
+                autoComplete="password-new"
+              />
+              <TouchableOpacity style={styles.primaryBtn} onPress={handleResetPassword}>
+                <Text style={styles.primaryBtnText}>Set New Password</Text>
+              </TouchableOpacity>
+              <TouchableOpacity onPress={() => setAuthView("recovery")} style={{ marginTop: 12 }}>
+                <Text style={styles.linkText}>Send a new code</Text>
               </TouchableOpacity>
               <TouchableOpacity onPress={() => setAuthView("login")} style={{ marginTop: 12 }}>
                 <Text style={styles.linkText}>Back to Login</Text>
@@ -436,16 +582,16 @@ function ResidentApp() {
         </View>
         <TouchableOpacity
           style={styles.logoutBtn}
-          onPress={() => {
-            apiClient.setToken(null);
-            setAuthView("login");
-          }}
+          onPress={() => signOut()}
         >
           <Text style={styles.logoutText}>Sign Out</Text>
         </TouchableOpacity>
       </View>
 
-      <ScrollView style={styles.content}>
+      <ScrollView
+        style={styles.content}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onPullToRefresh} />}
+      >
         {/* Generated Pass Banner */}
         {generatedPassModal && (
           <View style={styles.passCard}>
@@ -658,7 +804,10 @@ function ResidentApp() {
           <TouchableOpacity
             key={t.key}
             style={[styles.tabItem, activeTab === t.key && styles.tabItemActive]}
-            onPress={() => setActiveTab(t.key)}
+            onPress={() => {
+              setActiveTab(t.key);
+              refreshResidentData();
+            }}
           >
             <Text style={[styles.tabLabel, activeTab === t.key && styles.tabLabelActive]}>{t.label}</Text>
           </TouchableOpacity>

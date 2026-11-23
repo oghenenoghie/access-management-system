@@ -77,6 +77,13 @@ export class EstateApiClient {
     });
   }
 
+  resetPassword(email, recoveryCode, newPassword) {
+    return this.request("/api/auth/password-reset", {
+      method: "POST",
+      body: JSON.stringify({ email, recovery_code: recoveryCode, new_password: newPassword }),
+    });
+  }
+
   createAccessCode(payload) {
     return this.request("/api/residents/access-codes", {
       method: "POST",

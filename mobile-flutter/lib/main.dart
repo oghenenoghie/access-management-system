@@ -1,8 +1,16 @@
 import 'dart:convert';
+import 'package:flutter/foundation.dart' show kReleaseMode;
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 
 import 'qr_scan_page.dart';
+
+/// Demo mode pre-fills the demo officer sign-in, shows sample visitors and
+/// logs, and falls back to built-in demo codes when the server can't be
+/// reached. On by default in debug/profile builds, off in release builds, so a
+/// real gate never verifies against made-up data. Override with
+/// --dart-define=DEMO_MODE=true|false.
+const bool kDemoMode = bool.fromEnvironment('DEMO_MODE', defaultValue: !kReleaseMode);
 
 void main() {
   runApp(const EstateGateSecurityApp());
@@ -50,10 +58,10 @@ class _SecurityGateHomeScreenState extends State<SecurityGateHomeScreen> {
   String selectedGate = 'Main North Gate';
   String? jwtToken;
 
-  final TextEditingController _emailCtrl =
-      TextEditingController(text: 'security.north@royalpalmsestate.com');
+  final TextEditingController _emailCtrl = TextEditingController(
+      text: kDemoMode ? 'security.north@royalpalmsestate.com' : '');
   final TextEditingController _passCtrl =
-      TextEditingController(text: 'Security@123');
+      TextEditingController(text: kDemoMode ? 'Security@123' : '');
   final TextEditingController _codeInputCtrl = TextEditingController();
   final TextEditingController _plateInputCtrl = TextEditingController();
   final TextEditingController _notesInputCtrl = TextEditingController();
@@ -61,7 +69,8 @@ class _SecurityGateHomeScreenState extends State<SecurityGateHomeScreen> {
   Map<String, dynamic>? verificationResult;
   bool isLoading = false;
 
-  List<Map<String, dynamic>> activeVisitors = [
+  List<Map<String, dynamic>> activeVisitors = kDemoMode
+      ? [
     {
       'id': 2,
       'code_entered': '739104',
@@ -75,9 +84,11 @@ class _SecurityGateHomeScreenState extends State<SecurityGateHomeScreen> {
       'exit_time': null,
       'action': 'entry_granted',
     },
-  ];
+        ]
+      : [];
 
-  List<Map<String, dynamic>> electronicGateLogs = [
+  List<Map<String, dynamic>> electronicGateLogs = kDemoMode
+      ? [
     {
       'id': 1,
       'code_entered': '510293',
@@ -98,7 +109,8 @@ class _SecurityGateHomeScreenState extends State<SecurityGateHomeScreen> {
       'rejection_reason': 'Code expired',
       'entry_time': '08:15 AM',
     },
-  ];
+        ]
+      : [];
 
   /// Signed in through the backend. When true the server is the source of
   /// truth for verification, admissions, exits and the logbook; when false the
@@ -210,10 +222,19 @@ class _SecurityGateHomeScreenState extends State<SecurityGateHomeScreen> {
         return;
       }
     } catch (_) {
-      // Uses local fallback credentials when offline
       serverProblem = 'Could not reach the server at $apiBase.';
     }
     if (!mounted) return;
+    if (serverProblem != null && !kDemoMode) {
+      // Real builds never fall back to demo data: stay on the sign-in screen.
+      setState(() => isLoading = false);
+      _showMessage(
+        '$serverProblem Check the gate\'s network connection and try again.',
+        Colors.red.shade700,
+        duration: const Duration(seconds: 8),
+      );
+      return;
+    }
     setState(() {
       isLoading = false;
       isAuthenticated = true;
@@ -272,6 +293,7 @@ class _SecurityGateHomeScreenState extends State<SecurityGateHomeScreen> {
           if (!mounted) return;
           setState(() {
             verificationResult = jsonDecode(resp.body);
+            _prefillPlate(verificationResult);
             isLoading = false;
           });
           // Rejected attempts are logged on the server; show them in the logbook.
@@ -377,8 +399,16 @@ class _SecurityGateHomeScreenState extends State<SecurityGateHomeScreen> {
 
     setState(() {
       verificationResult = localResult;
+      _prefillPlate(localResult);
       isLoading = false;
     });
+  }
+
+  /// Fills the plate box with the plate the resident registered for the pass,
+  /// so the officer only has to check it against the car.
+  void _prefillPlate(Map<String, dynamic>? result) {
+    final pass = result?['access_code'];
+    _plateInputCtrl.text = pass is Map ? '${pass['vehicle_plate'] ?? ''}' : '';
   }
 
   Future<void> _admitVisitor() async {
@@ -386,6 +416,17 @@ class _SecurityGateHomeScreenState extends State<SecurityGateHomeScreen> {
       return;
     }
     final ac = verificationResult!['access_code'];
+
+    // The pass code typed into the plate box is a common slip; catch it before
+    // it's saved as the car's plate.
+    final typedPlate = _plateInputCtrl.text.replaceAll(RegExp(r'\s'), '');
+    if (typedPlate.isNotEmpty && typedPlate == '${ac['code']}') {
+      _showMessage(
+        "That's the pass code, not a number plate. Enter the car's plate, or leave the box empty.",
+        Colors.orange.shade800,
+      );
+      return;
+    }
 
     if (_isOnline) {
       final plate = _plateInputCtrl.text.trim();
@@ -667,11 +708,13 @@ class _SecurityGateHomeScreenState extends State<SecurityGateHomeScreen> {
                               fontWeight: FontWeight.bold,
                             ),
                           ),
-                          const SizedBox(height: 8),
-                          const Text(
-                            'Demo Codes: 482910 (Valid), 739104 (Temp), 510293 (Used), 194822 (Expired)',
-                            style: TextStyle(fontSize: 12, color: Colors.grey),
-                          ),
+                          if (!_isOnline) ...[
+                            const SizedBox(height: 8),
+                            const Text(
+                              'Offline demo codes: 482910 (Valid), 739104 (Temp), 510293 (Used), 194822 (Expired)',
+                              style: TextStyle(fontSize: 12, color: Colors.grey),
+                            ),
+                          ],
                           const SizedBox(height: 12),
                           TextField(
                             controller: _codeInputCtrl,
@@ -770,8 +813,11 @@ class _SecurityGateHomeScreenState extends State<SecurityGateHomeScreen> {
                               const SizedBox(height: 12),
                               TextField(
                                 controller: _plateInputCtrl,
+                                textCapitalization: TextCapitalization.characters,
                                 decoration: const InputDecoration(
-                                  labelText: 'Confirm Vehicle Plate (Optional)',
+                                  labelText: 'Vehicle number plate (optional)',
+                                  helperText:
+                                      "The car's plate, e.g. LSR-482-KJ. Not the pass code.",
                                   border: OutlineInputBorder(),
                                   filled: true,
                                   fillColor: Colors.white,
