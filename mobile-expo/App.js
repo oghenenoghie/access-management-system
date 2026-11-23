@@ -12,7 +12,19 @@ import {
   StatusBar,
 } from "react-native";
 import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
+import QRCode from "react-native-qrcode-svg";
 import { apiClient } from "./src/api/client";
+
+// The pass QR the visitor shows at the gate. Dark-on-white with a quiet zone,
+// so the gate app's camera can read it even on a dark card.
+function PassQr({ value }) {
+  if (!value) return null;
+  return (
+    <View style={styles.passQrBox}>
+      <QRCode value={value} size={180} color="#000000" backgroundColor="#FFFFFF" quietZone={8} />
+    </View>
+  );
+}
 
 // SafeAreaView from react-native-safe-area-context needs a SafeAreaProvider
 // above it to measure the status bar, notch and navigation bar insets.
@@ -125,6 +137,7 @@ function ResidentApp() {
   ]);
 
   const [generatedPassModal, setGeneratedPassModal] = useState(null);
+  const [qrShownForId, setQrShownForId] = useState(null);
 
   const handleLogin = async () => {
     try {
@@ -414,7 +427,7 @@ function ResidentApp() {
           <View style={styles.passCard}>
             <Text style={styles.passHeader}>NEW VISITOR ACCESS PASS GENERATED</Text>
             <Text style={styles.passCode}>{generatedPassModal.code}</Text>
-            <Text style={styles.passQrBox}>[ QR PAYLOAD: {generatedPassModal.qr_payload} ]</Text>
+            <PassQr value={generatedPassModal.qr_payload} />
             <Text style={styles.passDetail}>Visitor: {generatedPassModal.visitor_name}</Text>
             <Text style={styles.passDetail}>
               Type: {generatedPassModal.code_type === "one_time" ? "One-Time Entry" : `Temporary (${generatedPassModal.max_uses} uses)`}
@@ -537,8 +550,18 @@ function ResidentApp() {
                 </Text>
                 <Text style={styles.itemSub}>Valid Until: {ac.valid_until}</Text>
 
+                {ac.status === "active" && qrShownForId === ac.id && <PassQr value={ac.qr_payload} />}
+
                 {ac.status === "active" && (
                   <View style={styles.actionRow}>
+                    {ac.qr_payload ? (
+                      <TouchableOpacity
+                        style={styles.smallQrBtn}
+                        onPress={() => setQrShownForId(qrShownForId === ac.id ? null : ac.id)}
+                      >
+                        <Text style={styles.smallBtnText}>{qrShownForId === ac.id ? "Hide QR" : "Show QR"}</Text>
+                      </TouchableOpacity>
+                    ) : null}
                     <TouchableOpacity style={styles.smallShareBtn} onPress={() => handleShareWhatsApp(ac)}>
                       <Text style={styles.smallBtnText}>WhatsApp</Text>
                     </TouchableOpacity>
@@ -686,13 +709,11 @@ const styles = StyleSheet.create({
   passHeader: { color: "#38BDF8", fontSize: 11, fontWeight: "800", letterSpacing: 1 },
   passCode: { color: "#FFFFFF", fontSize: 36, fontWeight: "900", letterSpacing: 6, marginVertical: 8 },
   passQrBox: {
-    color: "#E2E8F0",
-    fontSize: 11,
-    backgroundColor: "#1E293B",
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 6,
-    marginBottom: 8,
+    alignSelf: "center",
+    backgroundColor: "#FFFFFF",
+    padding: 4,
+    borderRadius: 8,
+    marginVertical: 10,
   },
   passDetail: { color: "#CBD5E1", fontSize: 13, marginBottom: 2 },
   shareRow: { flexDirection: "row", marginTop: 12 },
@@ -714,7 +735,8 @@ const styles = StyleSheet.create({
   statusRejected: { backgroundColor: "#FEE2E2", color: "#B91C1C" },
   itemTitle: { fontSize: 16, fontWeight: "700", color: "#1E293B" },
   itemSub: { fontSize: 13, color: "#64748B", marginTop: 2 },
-  actionRow: { flexDirection: "row", marginTop: 12 },
+  actionRow: { flexDirection: "row", flexWrap: "wrap", rowGap: 8, marginTop: 12 },
+  smallQrBtn: { backgroundColor: "#0F172A", paddingHorizontal: 12, paddingVertical: 7, borderRadius: 6, marginRight: 8 },
   smallShareBtn: { backgroundColor: "#16A34A", paddingHorizontal: 12, paddingVertical: 7, borderRadius: 6, marginRight: 8 },
   smallSmsBtn: { backgroundColor: "#0284C7", paddingHorizontal: 12, paddingVertical: 7, borderRadius: 6, marginRight: 8 },
   smallBtnText: { color: "#FFFFFF", fontSize: 12, fontWeight: "700" },

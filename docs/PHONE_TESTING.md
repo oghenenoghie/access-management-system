@@ -188,17 +188,17 @@ QR, the camera closes, the 6-digit code appears in the box, and the result
 shows as if you had tapped **Verify Code**. The whole QR text is sent to the
 server, which accepts either a bare code or a pass QR.
 
-The resident app doesn't draw the QR image yet; its pass banner shows the QR
-text (`[ QR PAYLOAD: ESTATE-PASS|CODE:…|UNIT:…|SIG:… ]`). To test scanning,
-turn that text into an image on the PC and point the phone at the screen:
+The resident app draws the pass QR on the new-pass card, and **Show QR** on
+any active pass in **My Codes** shows it again. In real use the visitor shows
+it on their own phone. With one phone, put the QR on the PC screen instead:
+screenshot the resident app (`adb exec-out screencap -p > pass.png`) and open
+the image on the PC, or make one from the pass's QR text:
 
 ```powershell
 cd backend
 .venv\Scripts\python -c "import qrcode; qrcode.make('ESTATE-PASS|CODE:123456|UNIT:1|SIG:ABC123').save('pass-qr.png')"
 start pass-qr.png
 ```
-
-Replace the text in quotes with the payload from the resident app.
 
 ## Troubleshooting
 
@@ -217,7 +217,7 @@ Replace the text in quotes with the payload from the resident app.
 
 ## Known gaps
 
-- **The resident app doesn't draw pass QR codes.** It shows the QR text
-  instead; `react-native-qrcode-svg` is already a dependency for drawing it.
+- **Sharing sends text only.** WhatsApp and SMS sharing send the 6-digit code
+  and details, not the QR image.
 - **The Flutter app ID** is `com.royalpalms.estate_gate_access_flutter`. To
   change it, edit `applicationId` in `android/app/build.gradle.kts`.
