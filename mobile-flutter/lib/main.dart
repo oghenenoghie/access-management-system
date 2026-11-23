@@ -201,8 +201,13 @@ class _SecurityGateHomeScreenState extends State<SecurityGateHomeScreen> {
         activeVisitors = [];
         electronicGateLogs = [];
       } else {
-        serverProblem =
-            'The server at $apiBase refused the sign-in (HTTP ${resp.statusCode}).';
+        // The server answered and said no (wrong password, suspended or
+        // deactivated account, too many attempts): stay on the sign-in screen.
+        // Offline demo mode is only for when the server can't be reached.
+        if (!mounted) return;
+        setState(() => isLoading = false);
+        _showMessage('Sign-in refused: ${_serverError(resp)}', Colors.red.shade700);
+        return;
       }
     } catch (_) {
       // Uses local fallback credentials when offline

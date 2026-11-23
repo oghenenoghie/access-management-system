@@ -50,6 +50,7 @@ function ResidentApp() {
   const [regPhone, setRegPhone] = useState("");
   const [regEstateId, setRegEstateId] = useState("EST-2026-");
   const [regUnit, setRegUnit] = useState("Block A - Apt 104");
+  const [regPassword, setRegPassword] = useState("");
   const [recoveryEmail, setRecoveryEmail] = useState("");
 
   // Visitor Code Generation inputs
@@ -147,8 +148,14 @@ function ResidentApp() {
       setAuthView("authenticated");
       refreshResidentData();
     } catch (err) {
-      // Fallback to seeded demo resident if backend server is offline
       apiClient.setToken(null);
+      if (err.status) {
+        // The server answered and refused (wrong password, pending or suspended
+        // account, too many attempts): don't let them in on demo data.
+        Alert.alert("Sign-in failed", err.message);
+        return;
+      }
+      // Fallback to seeded demo resident only when the server can't be reached
       Alert.alert(
         "Offline demo mode",
         `Sign-in through ${apiClient.baseUrl} failed (${err.message}). ` +
@@ -171,20 +178,28 @@ function ResidentApp() {
       Alert.alert("Invalid Estate ID", "Estate-approved identification number must begin with EST-");
       return;
     }
+    if (regPassword.length < 8) {
+      Alert.alert("Choose a password", "Your password must be at least 8 characters.");
+      return;
+    }
     try {
       await apiClient.registerResident({
         full_name: regName,
         email: regEmail,
         phone: regPhone,
-        password: password || "Resident@123",
+        password: regPassword,
         estate_id_number: regEstateId,
         unit_number: regUnit,
       });
-      Alert.alert("Registration Successful", "Your resident account has been created. Please sign in.");
+      Alert.alert(
+        "Registration received",
+        "Estate Management will review your account. You can sign in once it's approved."
+      );
+      setRegPassword("");
       setAuthView("login");
     } catch (err) {
-      Alert.alert("Registration Verified", `Estate ID ${regEstateId} verified for ${regUnit}. You may now log in.`);
-      setAuthView("login");
+      // Stay on the form so the details can be corrected.
+      Alert.alert("Registration failed", err.message);
     }
   };
 
@@ -363,6 +378,15 @@ function ResidentApp() {
               <TextInput style={styles.input} value={regEmail} onChangeText={setRegEmail} autoCapitalize="none" />
               <Text style={styles.inputLabel}>Telephone Number</Text>
               <TextInput style={styles.input} value={regPhone} onChangeText={setRegPhone} keyboardType="phone-pad" />
+              <Text style={styles.inputLabel}>Password (at least 8 characters)</Text>
+              <TextInput
+                style={styles.input}
+                value={regPassword}
+                onChangeText={setRegPassword}
+                secureTextEntry
+                autoCapitalize="none"
+                autoComplete="password-new"
+              />
               <TouchableOpacity style={styles.primaryBtn} onPress={handleRegister}>
                 <Text style={styles.primaryBtnText}>Complete Resident Registration</Text>
               </TouchableOpacity>

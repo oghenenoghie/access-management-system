@@ -43,12 +43,15 @@ export class EstateApiClient {
         headers,
       });
     } catch {
-      throw new Error(`Could not reach the server at ${this.baseUrl}.`);
+      // status 0 = the server couldn't be reached at all
+      throw Object.assign(new Error(`Could not reach the server at ${this.baseUrl}.`), { status: 0 });
     }
 
     const data = await response.json().catch(() => ({}));
     if (!response.ok) {
-      throw new Error(describeError(data.detail, response.status));
+      throw Object.assign(new Error(describeError(data.detail, response.status)), {
+        status: response.status,
+      });
     }
     return data;
   }
