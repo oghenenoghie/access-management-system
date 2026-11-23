@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from "react";
 import {
-  SafeAreaView,
   View,
   Text,
   TextInput,
@@ -12,9 +11,20 @@ import {
   Alert,
   StatusBar,
 } from "react-native";
+import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
 import { apiClient } from "./src/api/client";
 
+// SafeAreaView from react-native-safe-area-context needs a SafeAreaProvider
+// above it to measure the status bar, notch and navigation bar insets.
 export default function App() {
+  return (
+    <SafeAreaProvider>
+      <ResidentApp />
+    </SafeAreaProvider>
+  );
+}
+
+function ResidentApp() {
   // Auth state: "login" | "register" | "recovery" | "authenticated"
   const [authView, setAuthView] = useState("login");
   const [user, setUser] = useState(null);
