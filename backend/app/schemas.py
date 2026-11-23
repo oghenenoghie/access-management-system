@@ -28,6 +28,11 @@ class PasswordResetConfirm(BaseModel):
     new_password: str = Field(..., min_length=8, max_length=128, description="At least 8 characters")
 
 
+class PasswordChangeRequest(BaseModel):
+    current_password: str
+    new_password: str = Field(..., min_length=8, max_length=128, description="At least 8 characters")
+
+
 class ProfileUpdateRequest(BaseModel):
     full_name: Optional[str] = None
     phone: Optional[str] = None

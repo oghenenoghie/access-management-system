@@ -181,6 +181,20 @@ class FailureLimiter:
             self._failures.pop(key, None)
 
 
+# Number of reverse proxies in front of the app that append the client's address
+# to X-Forwarded-For (Railway: 1). Entries further left are written by the
+# client and can be faked, so only the one our own proxy added is trusted.
+TRUSTED_PROXY_HOPS = max(0, int(os.getenv("TRUSTED_PROXY_HOPS", "0")))
+
+
+def client_address(request) -> str:
+    if TRUSTED_PROXY_HOPS:
+        forwarded = [h.strip() for h in request.headers.get("x-forwarded-for", "").split(",") if h.strip()]
+        if len(forwarded) >= TRUSTED_PROXY_HOPS:
+            return forwarded[-TRUSTED_PROXY_HOPS]
+    return request.client.host if request.client else "unknown"
+
+
 # 5 wrong passwords for one account, or 30 from one address, within 15 minutes.
 login_failures_by_account = FailureLimiter(max_failures=5, window_seconds=15 * 60)
 login_failures_by_address = FailureLimiter(max_failures=30, window_seconds=15 * 60)

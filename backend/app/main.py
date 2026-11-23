@@ -2,9 +2,16 @@ import os
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from .database import engine, Base, SessionLocal, add_missing_columns
+from .auth import IS_PRODUCTION
+from .bootstrap import ensure_initial_admin
+from .database import engine, Base, SessionLocal, add_missing_columns, IS_SQLITE
 from .routers import auth, residents, security, admin
 from .seed import seed_initial_data
+
+if IS_PRODUCTION and IS_SQLITE:
+    # Hosting platforms wipe the container's disk on every deploy or restart,
+    # which would silently delete every resident, pass and gate log.
+    raise RuntimeError("APP_ENV=production needs a PostgreSQL DATABASE_URL, not SQLite.")
 
 # Create database tables, and add columns introduced after a database was made
 Base.metadata.create_all(bind=engine)
@@ -19,6 +26,7 @@ CORS_ALLOWED_ORIGINS = [
     if origin.strip()
 ]
 
+# The interactive API docs are for development; don't publish them in production.
 app = FastAPI(
     title="Estate Gate Access Management System API",
     description=(
@@ -26,6 +34,9 @@ app = FastAPI(
         "Security Personnel Gate Interface (Flutter Android), and Estate Management Web Administration Dashboard (Next.js)."
     ),
     version="1.0.0",
+    docs_url=None if IS_PRODUCTION else "/docs",
+    redoc_url=None if IS_PRODUCTION else "/redoc",
+    openapi_url=None if IS_PRODUCTION else "/openapi.json",
 )
 
 # The clients send a bearer token in the Authorization header, not cookies, so
@@ -43,7 +54,11 @@ app.add_middleware(
 def on_startup():
     db = SessionLocal()
     try:
-        seed_initial_data(db)
+        if IS_PRODUCTION:
+            # Never load the demo accounts (their passwords are public).
+            ensure_initial_admin(db)
+        else:
+            seed_initial_data(db)
     finally:
         db.close()
 
@@ -60,5 +75,4 @@ def health_check():
         "system": "Estate Gate Access Management Platform",
         "status": "operational",
         "version": "1.0.0",
-        "docs_url": "/docs",
     }

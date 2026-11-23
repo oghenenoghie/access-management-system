@@ -13,6 +13,7 @@ from ..schemas import (
     ResidentRegisterRequest,
     PasswordRecoveryRequest,
     PasswordResetConfirm,
+    PasswordChangeRequest,
     ProfileUpdateRequest,
     TokenResponse,
     UserOut,
@@ -25,6 +26,7 @@ from ..auth import (
     login_failures_by_account,
     login_failures_by_address,
     recovery_requests_by_email,
+    client_address,
     create_access_token,
     get_current_user,
     IS_PRODUCTION,
@@ -41,7 +43,7 @@ RECOVERY_MAX_ATTEMPTS = 5
 @router.post("/login", response_model=TokenResponse)
 def login(payload: LoginRequest, request: Request, db: Session = Depends(get_db)):
     account_key = payload.identifier.lower().strip()
-    address_key = request.client.host if request.client else "unknown"
+    address_key = client_address(request)
     wait = max(login_failures_by_account.retry_after(account_key), login_failures_by_address.retry_after(address_key))
     if wait:
         raise HTTPException(
@@ -251,6 +253,33 @@ def confirm_password_reset(payload: PasswordResetConfirm, db: Session = Depends(
     db.commit()
     login_failures_by_account.reset(user.email)
     return {"message": "Password has been reset successfully. You may now log in."}
+
+
+@router.post("/me/password")
+def change_my_password(
+    payload: PasswordChangeRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    if not verify_password(payload.current_password, current_user.password_hash):
+        raise HTTPException(status_code=400, detail="Your current password is incorrect.")
+    if payload.new_password == payload.current_password:
+        raise HTTPException(status_code=400, detail="Choose a new password that's different from the current one.")
+
+    current_user.password_hash = hash_password(payload.new_password)
+    db.add(
+        AuditLog(
+            actor_id=current_user.id,
+            actor_name=current_user.full_name,
+            actor_role=current_user.role,
+            action="CHANGE_OWN_PASSWORD",
+            target_type="User",
+            target_id=str(current_user.id),
+            details="Changed their own password",
+        )
+    )
+    db.commit()
+    return {"message": "Password changed."}
 
 
 @router.get("/me", response_model=UserOut)

@@ -1,3 +1,4 @@
+import secrets
 from datetime import datetime, timedelta
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -15,7 +16,7 @@ from ..schemas import (
     AccessCodeOut,
     GateLogOut,
 )
-from ..auth import require_admin, hash_password
+from ..auth import require_admin, hash_password, login_failures_by_account
 from .residents import _format_code_out
 
 router = APIRouter(prefix="/api/admin", tags=["Estate Management Administration"])
@@ -199,6 +200,52 @@ def update_user_status(
     db.commit()
     db.refresh(user)
     return user
+
+
+@router.post("/users/{user_id}/reset-password")
+def reset_user_password(
+    user_id: int,
+    current_admin: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """Sets a one-time temporary password and returns it to the admin, who passes
+    it on in person or by phone. Used while no email/SMS sender is configured."""
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found.")
+    if user.id == current_admin.id:
+        raise HTTPException(status_code=400, detail="Use Change password for your own account.")
+
+    temporary_password = secrets.token_urlsafe(9)  # 12 characters
+    user.password_hash = hash_password(temporary_password)
+    user.recovery_code = None
+    user.recovery_expires_at = None
+    user.recovery_attempts = 0
+    db.add(
+        Notification(
+            user_id=user.id,
+            title="Password reset by Estate Management",
+            message="Estate Management reset your password. Sign in with the temporary password they gave you, then change it.",
+            event_type="account_update",
+        )
+    )
+    db.add(
+        AuditLog(
+            actor_id=current_admin.id,
+            actor_name=current_admin.full_name,
+            actor_role="admin",
+            action="ADMIN_RESET_PASSWORD",
+            target_type="User",
+            target_id=str(user.id),
+            details=f"Reset the password for {user.full_name}",
+        )
+    )
+    db.commit()
+    login_failures_by_account.reset(user.email)  # also lift any sign-in lockout
+    return {
+        "temporary_password": temporary_password,
+        "message": f"Give this temporary password to {user.full_name}. It won't be shown again.",
+    }
 
 
 # --- Residential Units & Apartment Management ---

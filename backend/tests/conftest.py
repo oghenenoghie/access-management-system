@@ -1,5 +1,9 @@
 """Test setup: every test gets a fresh copy of the seeded demo database.
 
+By default that's a temporary SQLite file. Set TEST_DATABASE_URL to a scratch
+PostgreSQL database (as CI does) to run the same tests against PostgreSQL; its
+tables are dropped and recreated for every test, so never point it at real data.
+
 The environment is configured before the app is imported, because the app reads
 DATABASE_URL and JWT_SECRET_KEY at import time. Nothing here touches
 backend/estate_access.db or backend/.jwt_secret.
@@ -13,8 +17,9 @@ from pathlib import Path
 _TMP = Path(tempfile.mkdtemp(prefix="estate-tests-"))
 _DB = _TMP / "test.db"
 _TEMPLATE = _TMP / "seeded.db"
+_POSTGRES_URL = os.environ.get("TEST_DATABASE_URL", "").strip()
 
-os.environ["DATABASE_URL"] = f"sqlite:///{_DB.as_posix()}"
+os.environ["DATABASE_URL"] = _POSTGRES_URL or f"sqlite:///{_DB.as_posix()}"
 os.environ["JWT_SECRET_KEY"] = "automated-tests-only-signing-key-0123456789abcdef"
 os.environ["APP_ENV"] = "test"
 os.environ["PASSWORD_HASH_ITERATIONS"] = "100000"  # the minimum; keeps tests quick
@@ -25,9 +30,17 @@ import pytest  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 
 from app import auth as auth_module  # noqa: E402
-from app.database import SessionLocal, engine  # noqa: E402
+from app.database import Base, SessionLocal, engine  # noqa: E402
 from app.main import app  # noqa: E402  (creates the tables)
 from app.seed import seed_initial_data  # noqa: E402
+
+
+def _seed():
+    db = SessionLocal()
+    try:
+        seed_initial_data(db)
+    finally:
+        db.close()
 
 DEMO_PASSWORDS = {
     "admin@royalpalmsestate.com": "Admin@123",
@@ -45,22 +58,28 @@ TUNDE = "tunde.bakare@example.com"  # pending resident
 
 @pytest.fixture(scope="session", autouse=True)
 def _seeded_template():
-    db = SessionLocal()
-    try:
-        seed_initial_data(db)
-    finally:
-        db.close()
-    engine.dispose()
-    shutil.copy(_DB, _TEMPLATE)
+    if not _POSTGRES_URL:
+        _seed()
+        engine.dispose()
+        shutil.copy(_DB, _TEMPLATE)
     yield
     engine.dispose()
     shutil.rmtree(_TMP, ignore_errors=True)
 
 
+def _fresh_database():
+    engine.dispose()
+    if _POSTGRES_URL:
+        Base.metadata.drop_all(bind=engine)
+        Base.metadata.create_all(bind=engine)
+        _seed()
+    else:
+        shutil.copy(_TEMPLATE, _DB)
+
+
 @pytest.fixture
 def client():
-    engine.dispose()
-    shutil.copy(_TEMPLATE, _DB)
+    _fresh_database()
     for limiter in (
         auth_module.login_failures_by_account,
         auth_module.login_failures_by_address,
