@@ -198,6 +198,162 @@ function ConfirmDialog({ req, onCancel }: { req: ConfirmRequest; onCancel: () =>
   );
 }
 
+const dialogOverlay: React.CSSProperties = {
+  position: "fixed",
+  inset: 0,
+  backgroundColor: "rgba(15, 23, 42, 0.55)",
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+  padding: "16px",
+  zIndex: 50,
+};
+const dialogBox: React.CSSProperties = {
+  backgroundColor: "#ffffff",
+  borderRadius: "14px",
+  padding: "22px",
+  width: "100%",
+  maxWidth: "440px",
+};
+const dialogInput: React.CSSProperties = {
+  display: "block",
+  width: "100%",
+  marginTop: "6px",
+  padding: "9px 10px",
+  borderRadius: "8px",
+  border: "1px solid #cbd5e1",
+  fontSize: "14px",
+};
+
+// Shows an admin-issued temporary password once, so it can be passed on.
+function TemporaryPasswordDialog({
+  name,
+  password,
+  onClose,
+}: {
+  name: string;
+  password: string;
+  onClose: () => void;
+}) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <div role="dialog" aria-modal="true" aria-labelledby="temp-title" style={dialogOverlay}>
+      <div style={dialogBox}>
+        <h3 id="temp-title" style={{ fontSize: "17px", fontWeight: 700, marginBottom: "8px", color: "#0f172a" }}>
+          Temporary password for {name}
+        </h3>
+        <p style={{ fontSize: "14px", color: "#334155", lineHeight: 1.5 }}>
+          Give it to them in person or by phone. It won&apos;t be shown again. Ask them to change it after signing in.
+        </p>
+        <div
+          style={{
+            fontFamily: "ui-monospace, SFMono-Regular, Consolas, monospace",
+            fontSize: "20px",
+            fontWeight: 700,
+            letterSpacing: "1px",
+            backgroundColor: "#f1f5f9",
+            padding: "12px 14px",
+            borderRadius: "8px",
+            margin: "14px 0",
+            wordBreak: "break-all",
+            userSelect: "all",
+          }}
+        >
+          {password}
+        </div>
+        <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px" }}>
+          <button
+            onClick={() => {
+              navigator.clipboard
+                ?.writeText(password)
+                .then(() => setCopied(true))
+                .catch(() => setCopied(false));
+            }}
+            style={{ ...primaryBtn, backgroundColor: "#0f172a", padding: "9px 16px" }}
+          >
+            {copied ? "Copied" : "Copy"}
+          </button>
+          <button autoFocus onClick={onClose} style={{ ...primaryBtn, padding: "9px 16px" }}>
+            Done
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ChangePasswordDialog({ onClose, onChanged }: { onClose: () => void; onChanged: () => void }) {
+  const [current, setCurrent] = useState("");
+  const [next, setNext] = useState("");
+  const [repeat, setRepeat] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (next.length < 8) return setError("The new password must be at least 8 characters.");
+    if (next !== repeat) return setError("The two new passwords don't match.");
+    setBusy(true);
+    setError(null);
+    try {
+      await api.changeOwnPassword(current, next);
+      onChanged();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Couldn't change the password.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const label: React.CSSProperties = { display: "block", fontSize: "13px", fontWeight: 600, color: "#334155", marginTop: "12px" };
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="change-title"
+      style={dialogOverlay}
+      onKeyDown={(e) => {
+        if (e.key === "Escape") onClose();
+      }}
+    >
+      <form onSubmit={submit} style={dialogBox}>
+        <h3 id="change-title" style={{ fontSize: "17px", fontWeight: 700, color: "#0f172a" }}>
+          Change your password
+        </h3>
+        <label style={label}>
+          Current password
+          <input type="password" autoComplete="current-password" value={current} onChange={(e) => setCurrent(e.target.value)} style={dialogInput} autoFocus />
+        </label>
+        <label style={label}>
+          New password (at least 8 characters)
+          <input type="password" autoComplete="new-password" value={next} onChange={(e) => setNext(e.target.value)} style={dialogInput} />
+        </label>
+        <label style={label}>
+          Repeat new password
+          <input type="password" autoComplete="new-password" value={repeat} onChange={(e) => setRepeat(e.target.value)} style={dialogInput} />
+        </label>
+        {error && (
+          <div role="alert" style={{ backgroundColor: "#fee2e2", color: "#b91c1c", padding: "9px 11px", borderRadius: "8px", fontSize: "13px", marginTop: "12px" }}>
+            {error}
+          </div>
+        )}
+        <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "18px" }}>
+          <button
+            type="button"
+            onClick={onClose}
+            style={{ backgroundColor: "#f1f5f9", color: "#0f172a", border: "none", padding: "9px 16px", borderRadius: "8px", fontWeight: 600, cursor: "pointer" }}
+          >
+            Cancel
+          </button>
+          <button type="submit" disabled={busy} style={{ ...primaryBtn, padding: "9px 16px" }}>
+            {busy ? "Saving…" : "Change password"}
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
 function EmptyRow({ cols, text }: { cols: number; text: string }) {
   return (
     <tr>
@@ -269,6 +425,8 @@ function Dashboard({
   const [notice, setNotice] = useState<string | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
   const [confirmReq, setConfirmReq] = useState<ConfirmRequest | null>(null);
+  const [tempPassword, setTempPassword] = useState<{ name: string; password: string } | null>(null);
+  const [changingPassword, setChangingPassword] = useState(false);
 
   // Filters & forms
   const [investigationQuery, setInvestigationQuery] = useState("");
@@ -415,6 +573,31 @@ function Dashboard({
     });
   };
 
+  const resetPassword = (u: User) => {
+    setConfirmReq({
+      title: `Reset ${u.full_name}'s password?`,
+      message:
+        "Their current password stops working straight away. You'll get a temporary password to give them in person or by phone.",
+      confirmLabel: "Reset password",
+      onConfirm: async () => {
+        setConfirmReq(null);
+        setBusy(true);
+        setError(null);
+        setNotice(null);
+        try {
+          const res = await api.resetPassword(u.id);
+          setTempPassword({ name: u.full_name, password: res.temporary_password });
+          setRefreshKey((k) => k + 1);
+          void loadAll(); // the reset appears in the audit trail
+        } catch (err) {
+          handleError(err);
+        } finally {
+          setBusy(false);
+        }
+      },
+    });
+  };
+
   const revokeCode = (c: AccessCode) => {
     setConfirmReq({
       title: `Revoke code ${c.code}?`,
@@ -498,6 +681,22 @@ function Dashboard({
   return (
     <div style={{ display: "flex", minHeight: "100vh" }}>
       {confirmReq && <ConfirmDialog req={confirmReq} onCancel={() => setConfirmReq(null)} />}
+      {tempPassword && (
+        <TemporaryPasswordDialog
+          name={tempPassword.name}
+          password={tempPassword.password}
+          onClose={() => setTempPassword(null)}
+        />
+      )}
+      {changingPassword && (
+        <ChangePasswordDialog
+          onClose={() => setChangingPassword(false)}
+          onChanged={() => {
+            setChangingPassword(false);
+            setNotice("Your password was changed.");
+          }}
+        />
+      )}
 
       {/* Sidebar */}
       <aside
@@ -551,20 +750,28 @@ function Dashboard({
         <div style={{ marginTop: "auto", padding: "16px 8px 0", borderTop: "1px solid #1e293b" }}>
           <div style={{ fontSize: "12px", color: "#94a3b8" }}>Signed in as</div>
           <div style={{ fontSize: "14px", fontWeight: 600, margin: "2px 0 10px" }}>{adminName}</div>
-          <button
-            onClick={() => onSignOut()}
-            style={{
-              backgroundColor: "#1e293b",
-              color: "#e2e8f0",
-              border: "none",
-              padding: "8px 12px",
-              borderRadius: "8px",
-              fontSize: "13px",
-              cursor: "pointer",
-            }}
-          >
-            Sign out
-          </button>
+          <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
+            {[
+              { label: "Change password", onClick: () => setChangingPassword(true) },
+              { label: "Sign out", onClick: () => onSignOut() },
+            ].map((b) => (
+              <button
+                key={b.label}
+                onClick={b.onClick}
+                style={{
+                  backgroundColor: "#1e293b",
+                  color: "#e2e8f0",
+                  border: "none",
+                  padding: "8px 12px",
+                  borderRadius: "8px",
+                  fontSize: "13px",
+                  cursor: "pointer",
+                }}
+              >
+                {b.label}
+              </button>
+            ))}
+          </div>
         </div>
       </aside>
 
@@ -772,6 +979,9 @@ function Dashboard({
                           Deactivate
                         </button>
                       )}
+                      <button disabled={busy} onClick={() => resetPassword(r)} style={smallBtn("#475569")}>
+                        Reset password
+                      </button>
                     </td>
                   </tr>
                 ))}
@@ -1166,6 +1376,9 @@ function Dashboard({
                             Deactivate
                           </button>
                         )}
+                        <button disabled={busy} onClick={() => resetPassword(o)} style={smallBtn("#475569")}>
+                          Reset password
+                        </button>
                       </td>
                     </tr>
                   ))}

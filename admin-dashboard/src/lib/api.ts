@@ -233,6 +233,15 @@ export const api = {
     estate_id_number?: string | null;
     unit_id?: number | null;
   }) => request<User>("/api/admin/users", { method: "POST", body: JSON.stringify(payload) }),
+  resetPassword: (id: number) =>
+    request<{ temporary_password: string; message: string }>(`/api/admin/users/${id}/reset-password`, {
+      method: "POST",
+    }),
+  changeOwnPassword: (currentPassword: string, newPassword: string) =>
+    request<{ message: string }>("/api/auth/me/password", {
+      method: "POST",
+      body: JSON.stringify({ current_password: currentPassword, new_password: newPassword }),
+    }),
   setUserStatus: (id: number, status: UserStatus, reason?: string) =>
     request<User>(`/api/admin/users/${id}/status`, {
       method: "PATCH",

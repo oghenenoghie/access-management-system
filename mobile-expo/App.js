@@ -61,6 +61,9 @@ function ResidentApp() {
   const [resetCode, setResetCode] = useState("");
   const [resetPassword, setResetPassword] = useState("");
   const [resetPasswordConfirm, setResetPasswordConfirm] = useState("");
+  const [pwCurrent, setPwCurrent] = useState("");
+  const [pwNew, setPwNew] = useState("");
+  const [pwRepeat, setPwRepeat] = useState("");
   const [regName, setRegName] = useState("");
   const [regEmail, setRegEmail] = useState("");
   const [regPhone, setRegPhone] = useState("");
@@ -265,6 +268,35 @@ function ResidentApp() {
       setAuthView("login");
     } catch (err) {
       Alert.alert("Couldn't reset the password", err.message);
+    }
+  };
+
+  const handleChangePassword = async () => {
+    if (!apiClient.token) {
+      Alert.alert("Not available offline", "Connect to the estate server to change your password.");
+      return;
+    }
+    if (pwNew.length < 8) {
+      Alert.alert("Choose a password", "Your new password must be at least 8 characters.");
+      return;
+    }
+    if (pwNew !== pwRepeat) {
+      Alert.alert("Passwords don't match", "Type the same new password in both boxes.");
+      return;
+    }
+    try {
+      await apiClient.changePassword(pwCurrent, pwNew);
+      setPwCurrent("");
+      setPwNew("");
+      setPwRepeat("");
+      setActiveTab("generate");
+      Alert.alert("Password changed", "Use your new password next time you sign in.");
+    } catch (err) {
+      if (err.status === 401) {
+        signOut("Your session has ended. Please sign in again.");
+        return;
+      }
+      Alert.alert("Couldn't change the password", err.message);
     }
   };
 
@@ -577,15 +609,20 @@ function ResidentApp() {
       {/* Header */}
       <View style={styles.header}>
         <View>
-          <Text style={styles.headerSubtitle}>{user?.unit?.unit_number || "Block A - Apt 101"}</Text>
+          <Text style={styles.headerSubtitle}>{user?.unit?.unit_number || ""}</Text>
           <Text style={styles.headerTitle}>{user?.full_name}</Text>
         </View>
-        <TouchableOpacity
-          style={styles.logoutBtn}
-          onPress={() => signOut()}
-        >
-          <Text style={styles.logoutText}>Sign Out</Text>
-        </TouchableOpacity>
+        <View style={{ flexDirection: "row" }}>
+          <TouchableOpacity
+            style={[styles.logoutBtn, { marginRight: 8 }]}
+            onPress={() => setActiveTab("password")}
+          >
+            <Text style={styles.logoutText}>Password</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.logoutBtn} onPress={() => signOut()}>
+            <Text style={styles.logoutText}>Sign Out</Text>
+          </TouchableOpacity>
+        </View>
       </View>
 
       <ScrollView
@@ -779,6 +816,46 @@ function ResidentApp() {
         )}
 
         {/* TAB 4: REAL-TIME NOTIFICATIONS */}
+        {/* CHANGE PASSWORD (opened from the header) */}
+        {activeTab === "password" && (
+          <View style={styles.sectionCard}>
+            <Text style={styles.sectionTitle}>Change Password</Text>
+            <Text style={styles.inputLabel}>Current Password</Text>
+            <TextInput
+              style={styles.input}
+              value={pwCurrent}
+              onChangeText={setPwCurrent}
+              secureTextEntry
+              autoCapitalize="none"
+              autoComplete="password"
+            />
+            <Text style={styles.inputLabel}>New Password (at least 8 characters)</Text>
+            <TextInput
+              style={styles.input}
+              value={pwNew}
+              onChangeText={setPwNew}
+              secureTextEntry
+              autoCapitalize="none"
+              autoComplete="password-new"
+            />
+            <Text style={styles.inputLabel}>Repeat New Password</Text>
+            <TextInput
+              style={styles.input}
+              value={pwRepeat}
+              onChangeText={setPwRepeat}
+              secureTextEntry
+              autoCapitalize="none"
+              autoComplete="password-new"
+            />
+            <TouchableOpacity style={styles.primaryBtn} onPress={handleChangePassword}>
+              <Text style={styles.primaryBtnText}>Change Password</Text>
+            </TouchableOpacity>
+            <TouchableOpacity onPress={() => setActiveTab("generate")} style={{ marginTop: 12 }}>
+              <Text style={styles.linkText}>Cancel</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+
         {activeTab === "notifications" && (
           <View>
             <Text style={styles.sectionTitle}>Gate & Access Notifications</Text>
